@@ -1,0 +1,219 @@
+/* Page setup: 20 mm left/right, 30 mm top, 40 mm bottom */
+@page {
+  size: A4;
+  margin: 30mm 20mm 40mm 20mm;
+}
+
+body {
+  font-family: "trebuchet ms", verdana, arial, sans-serif;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #000;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 30px 40px;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-family: "trebuchet ms", verdana, arial, sans-serif;
+  font-weight: 600;
+  color: #0271bb;
+  margin-top: 1.4em;
+  margin-bottom: 0.6em;
+  line-height: 1.3;
+}
+
+h1 {
+  font-size: 2em;
+  border-bottom: 2px solid #7fb3d5;
+  padding-bottom: 0.3em;
+}
+
+h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid #7fb3d5;
+  padding-bottom: 0.25em;
+}
+
+h3 { font-size: 1.25em; }
+h4 { font-size: 1.1em; }
+h5 { font-size: 1em; }
+h6 { font-size: 0.9em; color: #4a7ba5; }
+
+/* First heading shouldn't float too far from the top */
+h1:first-child,
+h2:first-child {
+  margin-top: 0;
+}
+
+/* Paragraphs & text */
+p {
+  margin: 0.8em 0;
+}
+
+strong { color: #000; }
+
+em { color: #0271bb; }
+
+a {
+  color: #0271bb;
+  text-decoration: none;
+}
+
+a:hover { text-decoration: underline; }
+
+/* Blockquotes */
+blockquote {
+  margin: 1em 0;
+  padding: 0.4em 1em;
+  color: #123a52;
+  border-left: 4px solid #0271bb;
+  background-color: #d6eaf8;
+}
+
+blockquote p {
+  margin: 0.4em 0;
+}
+
+/* Lists */
+ul, ol {
+  margin: 0.6em 0;
+  padding-left: 1.6em;
+}
+
+li {
+  margin: 0.3em 0;
+}
+
+li > ul, li > ol {
+  margin: 0.3em 0;
+}
+
+/* Code */
+code {
+  font-family: "Cascadia Code", "Fira Code", Consolas, "Courier New", monospace;
+  font-size: 0.88em;
+  background-color: #eaf3fa !important;
+  color: #0a3a5c !important;
+  border: 1px solid #b8d4ea;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+}
+
+/* Override the highlight.js theme injected by the Markdown PDF extension */
+code,
+code span,
+code .hljs,
+.hljs,
+.hljs-built_in,
+.hljs-class .hljs-title,
+.hljs-keyword,
+.hljs-literal,
+.hljs-name,
+.hljs-number,
+.hljs-params,
+.hljs-property,
+.hljs-string,
+.hljs-symbol,
+.hljs-title,
+.hljs-type,
+.hljs-variable {
+  color: #0a3a5c !important;
+  background-color: transparent !important;
+  font-style: normal !important;
+}
+
+pre {
+  background-color: #eaf3fa;
+  border: 1px solid #7fb3d5;
+  border-radius: 6px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  line-height: 1.45;
+  page-break-inside: avoid;
+}
+
+pre code {
+  background-color: transparent !important;
+  color: #123a52 !important;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.85em;
+}
+
+/* Tables */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  page-break-inside: avoid;
+}
+
+th, td {
+  border: 1px solid #7fb3d5;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+th {
+  background-color: #cfe4f5;
+  font-weight: 600;
+  color: #123a52;
+}
+
+tr:nth-child(even) {
+  background-color: #f2f8fc;
+}
+
+/* Horizontal rule */
+hr {
+  border: none;
+  border-top: 1px solid #7fb3d5;
+  margin: 2em 0;
+}
+
+/* Images */
+img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+/* Task lists (GitHub-style checkboxes) */
+input[type="checkbox"] {
+  margin-right: 0.5em;
+}
+
+/* Footnotes */
+.footnotes {
+  font-size: 0.85em;
+  color: #4a7ba5;
+  border-top: 1px solid #7fb3d5;
+  margin-top: 2em;
+  padding-top: 1em;
+}
+
+/* Mermaid flowcharts (rendered as inline SVG) */
+.mermaid svg,
+pre.mermaid svg,
+svg .node text,
+svg .edgeLabel,
+svg .label {
+  font-size: 10px !important;
+}
+
+/* Print-specific tweaks */
+@media print {
+  body {
+    padding: 0;
+  }
+
+  h1, h2, h3 {
+    page-break-after: avoid;
+  }
+
+  pre, blockquote, table, img {
+    page-break-inside: avoid;
+  }
+}
