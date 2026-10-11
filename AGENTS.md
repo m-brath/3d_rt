@@ -132,9 +132,8 @@ level-specific index arithmetic.
 
 ## Running and checking
 
-There is **no git repository** in this directory (`.git` is absent) and **no test runner
-installed**. Do not assume `git` commands work here; check before using them. Do not
-`git init` without being asked.
+This directory **is a git repository** (branch `main`). There is **no test runner
+installed**.
 
 Quick sanity check that the environment works:
 
