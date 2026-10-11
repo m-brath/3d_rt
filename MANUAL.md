@@ -4,7 +4,7 @@ User manual for **`rt3d`**, a 3D all-sky, monochromatic short-characteristics
 radiative-transfer solver written in pure NumPy.
 
 This manual documents the **actual code** in `rt3d/` (phases 0–6 complete,
-80 tests green). The agreed design and the decisions log live in
+110 tests green). The agreed design and the decisions log live in
 [`plan/plan.md`](plan/plan.md) — that file stays the source of truth for *why*
 a decision was made; this manual explains *what the code does and how to use
 it* and cross-references the plan instead of duplicating the log.
@@ -481,6 +481,87 @@ $\tau = 5$ slab, $g = 0$ (phase 4, `scripts/phase4_ng.py`):
 **$\omega = 0.5$: 22 → 10, $\omega = 0.9$: 87 → 13,
 $\omega = 0.99$: 178 → 14** (LI → Ng).
 
+### Delta-M scaling (`delta_M`)
+
+**What it is.** For strongly forward-peaked scattering ($g \gtrsim 0.5$)
+the HG lobe is unresolved on the 42-ordinate grid, the effective optical
+depth is overestimated by the un-split forward peak, and the
+λ-iteration scattering operator converges slowly (§4). **Delta-M
+(Wiscombe) scaling** subtracts the first $M$ Legendre moments of the HG
+phase function (its moments are $g^n$) from the scattering operator and
+reduces the *scattering part* of the extinction accordingly:
+
+$$
+\Phi_\delta(\cos\Theta)
+= \Phi_{\mathrm{HG}}(\cos\Theta)
+- \frac{1}{4\pi}\sum_{n=0}^{M-1}(2n+1)\,g^n P_n(\cos\Theta),
+\qquad
+\kappa_{e,\delta} = \kappa_e - \kappa_s\, g^M
+$$
+
+The subtracted moments are added back into the source function exactly,
+together with an explicit $-\omega g^M I$ term and the scale
+$1/(1 - \omega g^M)$ (`rt3d.source.scattering_source(..., delta_M=M)`),
+while all diffuse transport sweeps use $\kappa_{e,\delta}$
+(`rt3d.source.delta_extinction`). The split is defined on the
+row-normalized `hg_matrix` via
+`direction_grid.hg_delta_matrices(g, M)`, so
+`Phi_w == Phi_w_delta + sum(moments)` holds exactly as matrices —
+delta-M changes the iteration and the transport scaling, **not the
+converged discrete solution** (§4). The reduced diffuse extinction
+shortens the effective mean free path per scattering event, so the
+λ-iteration contracts far faster at large $g$.
+
+**How to use it.** Pass `delta_M=1` to `lambda_iteration` (default
+`delta_M = 0` = off). The phase runner scripts have a `DELTA_M = 0`
+config cell (`scripts/phase2_slab.py`, `scripts/phase4_ng.py`,
+`scripts/phase6_directions.py`). $M = 1$ (delta-Eddington) is the
+recommended, validated choice; $M = 2$ is implemented and tested as
+well.
+
+**When to use it.** $g \gtrsim 0.5$ — where the HG lobe is unresolved
+and plain LI suffers (the Gaussian cloud core has $g \approx 0.952$).
+At small $g$ delta-M can *slow* Ng-accelerated runs (table below), so
+leave it off for $g \lesssim 0.5$.
+
+**What it does not change.**
+
+- **The converged solution.** Delta-on and delta-off converge to the
+  same discrete solution up to the $O(\tau_{\mathrm{cell}})$
+  short-characteristics quadrature error of the explicit
+  $-\omega g^M I$ term — measured on the $\tau = 5$ slab: max relative
+  $\Delta J$ 3.9e-2 ($n_z = 8$) → 9.2e-3 ($n_z = 16$) → 2.1e-3
+  ($n_z = 32$), shrinking ~linearly with cell size (agreement on the
+  same solution, not an inconsistency).
+- **Beam attenuation.** $\tau_b$ and the ground beam irradiance keep
+  the **physical** $\kappa_e$ (the beam is not on the quadrature; the
+  moment subtraction applies to the diffuse field only, §3). Only the
+  first-scatter albedo factor becomes
+  $\omega/(1 - \omega g^M)$ in `beam_scattering_source`.
+- **Octree refinement.** Still driven by the physical $\kappa_e$ — it
+  runs outside the solver (§5).
+- **Validation anchors.** Anchor 3 (exact Beer–Lambert at
+  $\kappa_s = 0$) holds with delta on — this is *why* only the
+  scattering part of the extinction is scaled: full-extinction scaling
+  $\kappa_e (1 - g^M)$ breaks anchor 3 at $O(\tau_{\mathrm{cell}})$ and
+  makes plain LI diverge for $\omega < g^M$ (plan decisions log,
+  `plan/delta-m-plan.md`).
+
+Measured iteration counts on the $\tau = 5$ slab, $n_z = 16$,
+$\omega = 0.9$, $\mathrm{tol} = 10^{-8}$, 42 ordinates (plain LI →
+delta-M $M=1$, Ng → Ng + delta-M $M=1$):
+
+| $g$ | plain LI | Ng |
+|---|---|---|
+| 0.5 | 75 → 45 | 31 → **59** (slower) |
+| 0.8 | 67 → 22 | — |
+| 0.9 | 69 → 14 | 90 → 15 |
+| 0.95 | 65 → 11 | 82 → 11 |
+
+($M = 2$ at $g = 0.9$: 77 → 23 plain LI; the regression test
+`tests/test_delta_m.py::test_solver_acceleration_delta_M1` at
+$n_z = 8$, $\mathrm{tol} = 10^{-6}$, $g = 0.95$: 62 → 12.)
+
 ---
 
 # Part II — Usage
@@ -529,7 +610,7 @@ Quick sanity check:
 & C:\Users\fredd\miniforge3\envs\pyarts\python.exe -c "import numpy, scipy; print(numpy.__version__, scipy.__version__)"
 ```
 
-Running the test suite (80 tests, ≈ 2.5 min):
+Running the test suite (110 tests, ≈ 6 min):
 
 ```powershell
 $env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
@@ -564,7 +645,11 @@ One section per `rt3d` module, with the real signatures.
   Methods: `cos_theta() -> (N_dir,N_dir)`;
   `hg_matrix(g, with_weights=True, normalize=True) -> W` with
   $W_{ij} = \Phi_{\mathrm{HG}}(\Omega_j\to\Omega_i)\,w_j$ and unit row sums
-  when `normalize=True` (§4).
+  when `normalize=True` (§4);
+  `hg_delta_matrices(g, M) -> (Phi_w_delta, moments)` — exact delta-M
+  split of the row-normalized matrix,
+  `moments[n][i, j] = (2n+1) g^n P_n(Omega_i . Omega_j) w_j / (4 pi)`,
+  `Phi_w == Phi_w_delta + sum(moments)` (§8).
 - `icosahedric_grid(n_refine=1) -> direction_grid` — the single place the
   default $n_{\mathrm{refine}} = 1$ (42 ordinates) appears.
 
@@ -661,15 +746,22 @@ One section per `rt3d` module, with the real signatures.
   $\kappa_e \to 0$ guard (§2).
 - `mean_intensity(I, dg) -> J` — $J = \frac{1}{4\pi}\oint I\,d\Omega$.
 - `flux_vector(I, dg) -> F (n_cells,3)` — $F = \oint I\,\boldsymbol{\Omega}\,d\Omega$.
+- `delta_extinction(kappa_e, kappa_s, g, M) -> kappa_e - kappa_s * g**M`
+  — delta-M transport extinction (only the scattering part scaled;
+  `M = 0` returns `kappa_e` unchanged) (§8).
 - `scattering_source(I, dg, omega, B, Phi_w=None, g=0.0, beam_scat=None,
-  g_cells=None, g_decimals=2, Phi_cache=None) -> S (n_cells,N_dir)` —
+  g_cells=None, g_decimals=2, Phi_cache=None, delta_M=0) -> S (n_cells,N_dir)` —
   $S_{ic} = (1-\omega_c)B_c + \omega_c \sum_j w_j \Phi(\Omega_j\to\Omega_i) I_{cj} + \text{beam\_scat}$.
   Spatially varying $g$ (`g_cells`) is bucketed by `round(g, g_decimals)`
   with one BLAS matmul per bucket and an optional `{g: Phi_w}` `Phi_cache`
-  (§2/§4).
-- `beam_scattering_source(dg, omega_sun, F0, tau_b, omega, g, g_cells=None)
-  -> S_beam (n_cells,N_dir)` — fixed beam first-scatter term with normalized
-  HG row (§3).
+  (§2/§4). With `delta_M >= 1` the delta-M form is used instead —
+  `Phi_w_delta` + moment operators + explicit $-\omega g^M I$ term, scaled
+  by $1/(1 - \omega g^M)$; splits are cached under the tuple key
+  `(g_value, delta_M)` (§8).
+- `beam_scattering_source(dg, omega_sun, F0, tau_b, omega, g, g_cells=None,
+  delta_M=0) -> S_beam (n_cells,N_dir)` — fixed beam first-scatter term
+  with normalized HG row (§3); with `delta_M >= 1` the albedo factor
+  $\omega$ becomes $\omega/(1 - \omega g^M)$, $\tau_b$ stays physical (§8).
 
 ### `rt3d.accelerator` — Ng acceleration
 
@@ -680,11 +772,13 @@ One section per `rt3d` module, with the real signatures.
 ### `rt3d.solver` — the iteration loop
 
 - `lambda_iteration(grid, dg, kappa_e, kappa_s, B, bc, g=0.0,
-  periodic_box=None, beam=None, n_iter=100, tol=1e-8, ng=None) -> result`
+  periodic_box=None, beam=None, n_iter=100, tol=1e-8, ng=None,
+  delta_M=0) -> result`
   — the entry point. `grid` is a `unigrid` or `octree_grid`; $g$ scalar or
   `(n_cells,)`; `beam = {"omega_sun": (3,) unit, "F0": float}` or `None`;
   `ng` is `None`/`False` (plain LI), `True` (build `ng1d(grid)`) or a
-  prepared `ng1d`. Returns the result dict:
+  prepared `ng1d`; `delta_M = 0` off, `>= 1` delta-M scaling (§8).
+  Returns the result dict:
 
   | key | shape / type | meaning |
   |---|---|---|
@@ -696,6 +790,8 @@ One section per `rt3d` module, with the real signatures.
   | `history` | list of float | relative source change per iteration |
   | `n_iter` | int | iterations performed |
   | `converged` | bool | `history[-1] < tol` |
+  | `delta_M` | int | delta-M order used (0 = off) |
+  | `kappa_e_delta` | `(n_cells,)` | extinction used for the diffuse sweeps; equals `kappa_e` when `delta_M = 0` (§8) |
 
   Note there is **no `SolverConfig`** class (that name exists only in
   `plan/plan.md`); all configuration is via the keyword arguments above.
@@ -986,6 +1082,7 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 | `direction_grid(n_refine=1)` | icosahedral direction set with weights, up/down index split |
 | `.cos_theta()` | $(N,N)$ matrix of direction cosines |
 | `.hg_matrix(g, with_weights=True, normalize=True)` | weighted, row-normalized HG matrix |
+| `.hg_delta_matrices(g, M)` | exact delta-M split of the row-normalized HG matrix |
 | `icosahedric_grid(n_refine=1)` | build a `direction_grid` (default 42 ordinates) |
 
 ### `rt3d.geometry`
@@ -1047,8 +1144,9 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 | `single_scattering_albedo(kappa_e, kappa_s)` | $\omega = \kappa_s/\kappa_e$ with vacuum guard |
 | `mean_intensity(I, dg)` | $J = \frac{1}{4\pi}\oint I\,d\Omega$ |
 | `flux_vector(I, dg)` | $F = \oint I\,\boldsymbol{\Omega}\,d\Omega$ |
-| `scattering_source(I, dg, omega, B, Phi_w=None, g=0.0, beam_scat=None, g_cells=None, g_decimals=2, Phi_cache=None)` | direction-dependent source $S = (1-\omega)B + \omega\langle\Phi I\rangle + \text{beam\_scat}$ |
-| `beam_scattering_source(dg, omega_sun, F0, tau_b, omega, g, g_cells=None)` | fixed beam first-scatter source, normalized HG row |
+| `scattering_source(I, dg, omega, B, Phi_w=None, g=0.0, beam_scat=None, g_cells=None, g_decimals=2, Phi_cache=None, delta_M=0)` | direction-dependent source $S = (1-\omega)B + \omega\langle\Phi I\rangle + \text{beam\_scat}$; `delta_M >= 1` uses the delta-M form |
+| `beam_scattering_source(dg, omega_sun, F0, tau_b, omega, g, g_cells=None, delta_M=0)` | fixed beam first-scatter source, normalized HG row |
+| `delta_extinction(kappa_e, kappa_s, g, M)` | delta-M transport extinction $\kappa_e - \kappa_s g^M$ |
 
 ### `rt3d.accelerator`
 
@@ -1061,7 +1159,7 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 
 | signature | description |
 |---|---|
-| `lambda_iteration(grid, dg, kappa_e, kappa_s, B, bc, g=0.0, periodic_box=None, beam=None, n_iter=100, tol=1e-8, ng=None)` | the solver; returns `I, S, J, F, omega, history, n_iter, converged` |
+| `lambda_iteration(grid, dg, kappa_e, kappa_s, B, bc, g=0.0, periodic_box=None, beam=None, n_iter=100, tol=1e-8, ng=None, delta_M=0)` | the solver; returns `I, S, J, F, omega, history, n_iter, converged, delta_M, kappa_e_delta` |
 
 ### `rt3d.diagnostics`
 

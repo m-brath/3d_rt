@@ -40,6 +40,7 @@ KAPPA = 1.0  # extinction, uniform
 TAU = 5.0  # slab optical thickness
 NZ = 50  # z cells (hz = 0.25 -> cubic cells, hx = hy = hz)
 HZ = TAU / KAPPA / NZ
+DELTA_M = 0  # delta-M order (0 = off; this case has g = 0)
 
 # cubic cells: horizontal footprint 4 x 4 cells of size HZ, periodic
 hx = HZ
@@ -134,7 +135,7 @@ for omega in (0.5, 0.9):
     B = np.zeros(grid.n_cells)
     res = lambda_iteration(
         grid, dg, kappa_e, kappa_s, B, bc, g=0.0,
-        periodic_box=box, n_iter=2000, tol=1e-10,
+        periodic_box=box, n_iter=2000, tol=1e-10, delta_M=DELTA_M,
     )
     J3d = res["J"].reshape(grid.nz, grid.nx, grid.ny)[:, 1, 1]  # any column
     J_ref = slab_d1o(NZ, KAPPA, omega, HZ)

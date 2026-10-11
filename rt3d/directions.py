@@ -319,6 +319,71 @@ class direction_grid(object):
                 W = W / W.sum(axis=1, keepdims=True)
         return W
 
+    def hg_delta_matrices(self, g, M):
+        """
+        Delta-M split of the row-normalized weighted HG matrix.
+
+        The split is defined *on the normalized matrix* of hg_matrix
+        (normalize=True), so that Phi_w == Phi_w_delta + sum(moments)
+        exactly (as matrices, to machine precision).  The scattering
+        integral therefore splits exactly, for any intensity array I:
+
+            I @ Phi_w.T == I @ Phi_w_delta.T + sum_n I @ moments[n].T
+
+        Delta-M changes only the iteration/transport scaling (the caller
+        reduces the transport extinction to kappa_e - kappa_s * g**M, the
+        scattering part only; rt3d.source.delta_extinction) and adds the
+        explicit -omega * g**M * I term to the source), not the converged
+        discrete solution.
+
+        P_n(cos_theta_ij) is evaluated by the Legendre recurrence
+        P_0 = 1, P_1 = x, (n+1) P_{n+1} = (2n+1) x P_n - n P_{n-1}.
+
+        Parameters
+        ----------
+        g : float
+            Asymmetry parameter, -1 < g < 1.
+        M : int
+            Number of Legendre moments to subtract, positive integer.
+
+        Returns
+        -------
+        Phi_w_delta : (N_dir, N_dir) ndarray
+            hg_matrix(g) minus the first M Legendre moment operators.
+        moments : list of (N_dir, N_dir) ndarray
+            moments[n][i, j] = (2n+1) g**n P_n(Omega_i . Omega_j) * w_j / (4 pi),
+            n = 0 .. M-1, so that
+            Phi_w == Phi_w_delta + sum(moments) exactly.
+        """
+        if M < 1 or int(M) != M:
+            raise ValueError(f"M must be a positive integer, got {M}")
+        if not (-1.0 < g < 1.0):
+            raise ValueError(f"g must satisfy -1 < g < 1, got {g}")
+
+        x = self.cos_theta()
+        w4pi = self.weights[None, :] / (4.0 * np.pi)
+
+        # classical Wiscombe weights: HG Legendre moments are g**n, so the
+        # subtracted operators carry the factor g**n (unweighted subtraction
+        # would over-subtract P_1 at g < 1 and enlarge the M >= 2 residual)
+        moments = []
+        g_pow = 1.0  # g**n
+        P_nm1 = np.ones_like(x)  # P_0(x) = 1
+        moments.append(1.0 * g_pow * P_nm1 * w4pi)
+        if M >= 2:
+            P_n = x.copy()  # P_1(x) = x
+            g_pow *= g
+            moments.append(3.0 * g_pow * P_n * w4pi)
+            for n in range(1, M - 1):
+                # (n+1) P_{n+1} = (2n+1) x P_n - n P_{n-1}
+                P_np1 = ((2.0 * n + 1.0) * x * P_n - n * P_nm1) / (n + 1.0)
+                g_pow *= g
+                moments.append((2.0 * (n + 1) + 1.0) * g_pow * P_np1 * w4pi)
+                P_nm1, P_n = P_n, P_np1
+
+        Phi_w_delta = self.hg_matrix(g) - sum(moments)
+        return Phi_w_delta, moments
+
 
 def icosahedric_grid(n_refine=1):
     """

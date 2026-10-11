@@ -38,6 +38,7 @@ from rt3d.solver import lambda_iteration
 from rt3d.transport import boundary_conditions, sweep_direction
 
 N_REFINE = (1, 2, 3)  # 42 / 162 / 642 ordinates
+DELTA_M = 0  # delta-M order (0 = off; g = 0.952 slab is the showcase case)
 
 
 def rel_diff(a, b):
@@ -78,7 +79,8 @@ for n in N_REFINE:
     t0 = time.time()
     res = lambda_iteration(grid, dg, grid.kappa_e, grid.kappa_s,
                            np.zeros(grid.n_cells), bc, g=grid.g, beam=beam,
-                           periodic_box=box, n_iter=1000, tol=1e-6, ng=True)
+                           periodic_box=box, n_iter=1000, tol=1e-6, ng=True,
+                           delta_M=DELTA_M)
     wall = time.time() - t0
     bal = energy_balance(grid, res["I"], dg, grid.kappa_e - grid.kappa_s,
                          np.zeros(grid.n_cells))
@@ -140,7 +142,7 @@ for n in N_REFINE:
     t0 = time.time()
     res = lambda_iteration(sgrid, dg, ke, ks, np.zeros(sgrid.n_cells), bc,
                            g=sg, periodic_box=sbox, n_iter=1000, tol=1e-8,
-                           ng=True)
+                           ng=True, delta_M=DELTA_M)
     wall = time.time() - t0
     bal = energy_balance(sgrid, res["I"], dg, ke - ks,
                          np.zeros(sgrid.n_cells))

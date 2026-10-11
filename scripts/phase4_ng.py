@@ -36,6 +36,7 @@ from rt3d.solver import lambda_iteration
 from rt3d.transport import boundary_conditions
 
 N_REFINE = 1
+DELTA_M = 0  # delta-M order (0 = off; probes Ng x delta-M interaction in 1.)
 dg = icosahedric_grid(n_refine=N_REFINE)
 
 # %% 1. slab: omega -> 1
@@ -63,11 +64,13 @@ for omega in (0.5, 0.9, 0.99):
     ks = np.full(sgrid.n_cells, omega)
     t0 = time.time()
     r_li = lambda_iteration(sgrid, dg, ke, ks, np.zeros(sgrid.n_cells), sbc,
-                            periodic_box=sbox, n_iter=3000, tol=1e-8)
+                            periodic_box=sbox, n_iter=3000, tol=1e-8,
+                            delta_M=DELTA_M)
     t_li = time.time() - t0
     t0 = time.time()
     r_ng = lambda_iteration(sgrid, dg, ke, ks, np.zeros(sgrid.n_cells), sbc,
-                            periodic_box=sbox, n_iter=3000, tol=1e-8, ng=True)
+                            periodic_box=sbox, n_iter=3000, tol=1e-8, ng=True,
+                            delta_M=DELTA_M)
     t_ng = time.time() - t0
     J1 = r_li["J"].reshape(NZ, 4, 4).mean(axis=(1, 2))
     J2 = r_ng["J"].reshape(NZ, 4, 4).mean(axis=(1, 2))

@@ -17,6 +17,7 @@ import numpy as np
 from rt3d.characteristics import build_chain
 from rt3d.source import (
     beam_scattering_source,
+    delta_extinction,
     flux_vector,
     mean_intensity,
     scattering_source,
@@ -47,6 +48,7 @@ def lambda_iteration(
     n_iter=100,
     tol=1e-8,
     ng=None,
+    delta_M=0,
 ):
     """
     Plain lambda iteration for the monochromatic RTE.
@@ -77,6 +79,26 @@ def lambda_iteration(
         instance.  It replaces the source update between steps 2 and 3
         (plan section 5); the convergence history still measures the
         plain-LI residual of the swept source.
+    delta_M : int, optional
+        Delta-M (Wiscombe) scaling order, by default 0 (off).  With
+        M = delta_M >= 1 every diffuse transport/attenuation quantity
+        uses the reduced extinction kappa_e - kappa_s * g**M
+        (rt3d.source.delta_extinction - only the scattering part of the
+        extinction is scaled, so pure absorption kappa_s = 0 is exactly
+        unchanged) and the source uses the exact Legendre-moment split of
+        rt3d.source.scattering_source (plan/delta-m-plan.md).
+        The direct solar beam keeps its physical attenuation: tau_b and
+        the ground beam irradiance use the physical kappa_e (the beam is
+        not on the quadrature, the moment subtraction applies only to the
+        diffuse field); only its first-scatter albedo factor becomes
+        omega / (1 - omega * g**M).  The converged solution is identical
+        to delta_M = 0 up to the short-characteristics discretization of
+        the explicit -omega * g**M * I term (agreement improves ~linearly
+        with cell size); iteration is markedly faster for strongly
+        forward-peaked scattering and the effective diffuse optical
+        depth changes.  M = 1 is recommended for g >~ 0.5.  Octree
+        refinement is unaffected: it runs outside the solver on the
+        physical kappa_e.
 
     Returns
     -------
@@ -89,6 +111,9 @@ def lambda_iteration(
         'history'  list of relative source changes per iteration
         'n_iter'   iterations performed
         'converged' bool
+        'delta_M'  int, delta-M order used (0 = off)
+        'kappa_e_delta' (n_cells,) extinction actually used for the
+                   transport; equals kappa_e when delta_M == 0
     """
     from rt3d.octree import octree_grid
 
@@ -107,13 +132,35 @@ def lambda_iteration(
     n_cells = grid.n_leaf if is_octree else grid.n_cells
     g_cells = None if np.ndim(g) == 0 else np.asarray(g, dtype=float)
 
-    Phi_w = None if g_cells is not None else dg.hg_matrix(g)
-    Phi_cache = {} if g_cells is not None else None
+    # delta-M (Wiscombe) scaling: every diffuse transport/attenuation
+    # quantity below uses the reduced extinction kappa_e - kappa_s * g**M
+    # (only the scattering part is scaled); octree refinement runs
+    # outside the solver on the physical kappa_e (intended design).
+    if delta_M == 0:
+        kappa_e_delta = kappa_e
+    else:
+        kappa_e_delta = delta_extinction(
+            kappa_e, kappa_s, g if g_cells is None else g_cells, delta_M
+        )
+
+    if delta_M >= 1:
+        # the delta split replaces the plain HG matrix; the cache is
+        # keyed (g_value, delta_M) and built once, reused across iterations
+        Phi_w = None
+        Phi_cache = {}
+    else:
+        Phi_w = None if g_cells is not None else dg.hg_matrix(g)
+        Phi_cache = {} if g_cells is not None else None
 
     # fixed source parts: thermal + beam first scattering (never iterated)
     S_fixed = (1.0 - omega) * B
     beam_scat = None
     if beam is not None:
+        # the DIRECT beam attenuates with the physical kappa_e (it is not
+        # on the quadrature, the moment subtraction applies only to the
+        # diffuse field); the delta-M scaling of its first-scatter source
+        # enters via beam_scattering_source(delta_M=...) as
+        # kappa_s Phi F0 exp(-tau_b) / kappa_e_delta
         if is_octree:
             tau_b = beam_optical_depth_octree(
                 grid, beam["omega_sun"], kappa_e, periodic_box=periodic_box
@@ -124,7 +171,7 @@ def lambda_iteration(
             )
         beam_scat = beam_scattering_source(
             dg, beam["omega_sun"], beam["F0"], tau_b, omega,
-            g if g_cells is None else 0.0, g_cells=g_cells,
+            g if g_cells is None else 0.0, g_cells=g_cells, delta_M=delta_M,
         )
 
     # transport geometry depends only on grid + directions: build once.
@@ -158,6 +205,8 @@ def lambda_iteration(
         I_g_fixed = np.zeros(n_cells)
         I_g_fixed[mb] = ground.emissivity * ground.B_g
         if beam is not None:
+            # direct-beam irradiance at the ground: physical attenuation
+            # (tau_b and the bottom-cell extension use physical kappa_e)
             I_g_fixed[mb] += ground.albedo * beam_irradiance_ground(
                 grid, beam["omega_sun"], kappa_e, tau_b, beam["F0"]
             ) / np.pi
@@ -175,20 +224,24 @@ def lambda_iteration(
             for d, chain in enumerate(chains):
                 if is_octree:
                     I[:, d] = sweep_direction_octree_exact(
-                        grid, chain, kappa_e, S[:, d], bc
+                        grid, chain, kappa_e_delta, S[:, d], bc
                     )
                 else:
-                    I[:, d] = sweep_direction(grid, chain, kappa_e, S[:, d], bc)
+                    I[:, d] = sweep_direction(
+                        grid, chain, kappa_e_delta, S[:, d], bc
+                    )
         else:
             # downward ordinates first: they set the ground inflow
             for d in dg.down_idx:
                 chain = chains[d]
                 if is_octree:
                     I[:, d] = sweep_direction_octree_exact(
-                        grid, chain, kappa_e, S[:, d], bc
+                        grid, chain, kappa_e_delta, S[:, d], bc
                     )
                 else:
-                    I[:, d] = sweep_direction(grid, chain, kappa_e, S[:, d], bc)
+                    I[:, d] = sweep_direction(
+                        grid, chain, kappa_e_delta, S[:, d], bc
+                    )
             I_g = I_g_fixed.copy()
             I_g[mb] += ground.albedo * downward_irradiance(
                 I[:, dg.down_idx], dg
@@ -197,7 +250,7 @@ def lambda_iteration(
                 chain = chains[d]
                 if is_octree:
                     I[:, d] = sweep_direction_octree_exact(
-                        grid, chain, kappa_e, S[:, d], bc,
+                        grid, chain, kappa_e_delta, S[:, d], bc,
                         bottom_I=I_g[chain["entry_cell"]],
                     )
                 else:
@@ -206,12 +259,13 @@ def lambda_iteration(
                     # values must tile over all layers for bottom-entry
                     # roots
                     I[:, d] = sweep_direction(
-                        grid, chain, kappa_e, S[:, d], bc,
+                        grid, chain, kappa_e_delta, S[:, d], bc,
                         bottom_I=np.tile(I_g[: grid.ny * grid.nx], grid.nz),
                     )
         S_new = scattering_source(
-            I, dg, omega, B, Phi_w=Phi_w, beam_scat=beam_scat,
-            g_cells=g_cells, Phi_cache=Phi_cache,
+            I, dg, omega, B, Phi_w=Phi_w, g=g if g_cells is None else 0.0,
+            beam_scat=beam_scat, g_cells=g_cells, Phi_cache=Phi_cache,
+            delta_M=delta_M,
         )
         scale = max(np.max(np.abs(S_new)), 1e-30)
         rel = np.max(np.abs(S_new - S)) / scale
@@ -230,4 +284,6 @@ def lambda_iteration(
         "history": history,
         "n_iter": len(history),
         "converged": converged,
+        "delta_M": int(delta_M),
+        "kappa_e_delta": kappa_e_delta,
     }
