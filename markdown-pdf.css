@@ -203,6 +203,16 @@ svg .label {
   font-size: 10px !important;
 }
 
+/* Light grey background for flowchart boxes */
+.mermaid .node rect,
+.mermaid .node polygon,
+.mermaid .node circle,
+.mermaid .node ellipse,
+.mermaid .node path {
+  fill: #f0f0f0 !important;
+  stroke: #666 !important;
+}
+
 /* Print-specific tweaks */
 @media print {
   body {
