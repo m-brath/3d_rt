@@ -31,27 +31,38 @@ in phase 0.
 
 ## Environment
 
-Mamba/conda environment **`pyarts`**. There is no `mamba`/`conda` on `PATH` in a plain
-shell — call the environment interpreter by absolute path:
+Mamba/conda environment **`pyarts`**, living under the miniforge install — typically
+`~/miniforge3/envs/pyarts` on macOS/Linux or `%USERPROFILE%\miniforge3\envs\pyarts` on
+Windows (substitute your own install location). There is no `mamba`/`conda` on `PATH`
+in a plain shell — call the environment interpreter by absolute path:
 
-```powershell
-& C:\Users\fredd\miniforge3\envs\pyarts\python.exe <script.py>
+```sh
+# macOS / Linux
+~/miniforge3/envs/pyarts/bin/python <script.py>
 ```
 
-**BLAS gotcha:** the env's numpy links against the `libcblas.dll` shim, which
-*delay-loads* `openblas.dll` from `...\envs\pyarts\Library\bin`. Running the
+```powershell
+# Windows
+& "$env:USERPROFILE\miniforge3\envs\pyarts\python.exe" <script.py>
+```
+
+**BLAS gotcha (Windows only):** there the env's numpy links against the `libcblas.dll`
+shim, which *delay-loads* `openblas.dll` from `...\envs\pyarts\Library\bin`. Running the
 interpreter by absolute path **without activating the env** leaves that directory
 off `PATH`, and every matrix product then hard-crashes the process with exit code
 `-1066598273` (`0xC06D007F`, delay-load failure — no traceback). Prepend it to
 `PATH` before running anything that does a matmul:
 
 ```powershell
-$env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
+$env:Path = "$env:USERPROFILE\miniforge3\envs\pyarts\Library\bin;" + $env:Path
 ```
 
-Other envs on this machine (`astro`, `rvg`, `base`) are **not** for this project.
+On macOS/Linux the absolute interpreter path works as-is — no `PATH` fix needed.
 
-Installed and available in `pyarts`:
+Any conda environments other than `pyarts` on a machine are **not** for this project.
+
+Installed and available in `pyarts` (reference versions — they may differ slightly
+between machines; confirm with the sanity check below):
 
 | Package | Version |
 |---|---|
@@ -137,8 +148,14 @@ installed**.
 
 Quick sanity check that the environment works:
 
+```sh
+# macOS / Linux
+~/miniforge3/envs/pyarts/bin/python -c "import numpy, scipy; print(numpy.__version__, scipy.__version__)"
+```
+
 ```powershell
-& C:\Users\fredd\miniforge3\envs\pyarts\python.exe -c "import numpy, scipy; print(numpy.__version__, scipy.__version__)"
+# Windows
+& "$env:USERPROFILE\miniforge3\envs\pyarts\python.exe" -c "import numpy, scipy; print(numpy.__version__, scipy.__version__)"
 ```
 
 Plots must not block: use `matplotlib.use("Agg")` and `fig.savefig("plot/...")` for
