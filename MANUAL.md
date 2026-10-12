@@ -832,9 +832,17 @@ One section per `rt3d` module, with the real signatures.
 ## 11. Worked end-to-end example
 
 Gaussian cloud + Lambertian ground + solar beam, on both grids, Ng
-accelerated. The script below was **executed with the pyarts interpreter
-(PATH fix applied) and its output verified**; the printed numbers are the
-actual measured values. Figures are written to `plot/`.
+accelerated. The script below was **executed with the pyarts interpreter and
+its output verified**; the printed numbers are the actual measured values.
+Figures are written to `plot/`.
+
+**Units.** The solver itself is unit-agnostic — it only ever sees consistent
+numbers — so the example fixes a convention once: **lengths in m**, hence
+$\kappa_e$ and $\kappa_s$ in m$^{-1}$, and radiative quantities normalised to
+the incident beam flux $F_0 = 1$, i.e. $J/F_0$ and $I/F_0$ [sr$^{-1}$]. $g$ is
+dimensionless. With `tau_column_max = 10` over the 10 m box this gives a peak
+$\kappa_e \approx 3.9$ m$^{-1}$ (mean free path ≈ 0.26 m). The `scripts/phase*`
+runners use the same metre convention.
 
 ```mermaid
 flowchart LR
@@ -845,13 +853,18 @@ flowchart LR
     D --> E
     E --> F["result dict: I, S, J, F, omega, history, n_iter, converged"]
     F --> G["diagnostics: energy_balance, flux_divergence, heating_rate"]
-    F --> H["plots into plot/ (matplotlib Agg)"]
+    F --> H["2D plots into plot/ (matplotlib Agg)"]
+    H --> H1["input fields: pcolormesh of kappa_e, kappa_s, g"]
+    H --> H2["octree slice: PolyCollection over the leaves"]
+    H --> H3["J slice + band-mean profiles, all-sky images"]
+    F --> I["3D view (pyvista, optional): kappa_e isosurfaces + J volume"]
 ```
 
 ```python
 # gaussian_cloud_example.py — run from the repo root:
-#   $env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
-#   & C:\Users\fredd\miniforge3\envs\pyarts\python.exe gaussian_cloud_example.py
+#   Windows:      $env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
+#                 & C:\Users\fredd\miniforge3\envs\pyarts\python.exe gaussian_cloud_example.py
+#   macOS/Linux:  ~/miniforge3/envs/pyarts/bin/python gaussian_cloud_example.py
 import time
 
 import numpy as np
@@ -859,6 +872,8 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.collections import PolyCollection
+from matplotlib.colors import BoundaryNorm, Normalize
 
 from rt3d.cases.gaussian_cloud import gaussian_cloud
 from rt3d.directions import icosahedric_grid
@@ -869,9 +884,15 @@ from rt3d.solver import lambda_iteration
 from rt3d.diagnostics import (allsky, energy_balance, flux_divergence,
                               heating_rate)
 
+# Units: the solver is unit-agnostic, so the example fixes them once — lengths
+# in m, hence kappa_e, kappa_s in m^-1; radiative quantities are normalised to
+# the incident beam flux F0 = 1, i.e. J / F0 and I / F0 [sr^-1].  g is
+# dimensionless.
+LBL_X, LBL_Y, LBL_Z = "x  [m]", "y  [m]", "z  [m]"
+
 # ---------------------------------------------------------------- case setup
 case = gaussian_cloud(omega_cap=0.9)          # capped core: Ng makes it tractable
-box = case["box"]                              # x,y in [-5,5], z in [0,10]
+box = case["box"]                              # x,y in [-5,5], z in [0,10] (m)
 
 dg = icosahedric_grid(n_refine=1)              # 42 ordinates (development grid)
 print(f"N_dir = {dg.n_dir},  sum(w) - 4pi = {dg.weights.sum() - 4*np.pi:.3e}")
@@ -910,6 +931,8 @@ oct_.finalize()
 oct_.sample_fields(kappa_e=case["kappa_e"], kappa_s=case["kappa_s"],
                    g=case["g"], T=case["T"])
 print(f"octree:   n_leaf={oct_.n_leaf}, max_level={oct_.max_level}")
+lvl_cnt = np.bincount(oct_.level, minlength=oct_.max_level + 1)
+print("leaves per level:", ", ".join(f"L{l}: {k}" for l, k in enumerate(lvl_cnt)))
 
 t0 = time.perf_counter()
 res_oct = lambda_iteration(oct_, dg, oct_.kappa_e, oct_.kappa_s,
@@ -965,38 +988,221 @@ print(f"pointwise div F vs heating (interior): rms {err_rms*100:.1f}%, "
       f"max {err_max*100:.1f}% of max|heating|")
 
 # ---------------------------------------------------------------- plots
+# cell-edge coordinates so pcolormesh draws the actual cell boxes
+xe = np.concatenate([grid.x - grid.hx / 2, [grid.x[-1] + grid.hx / 2]])
+ze = np.concatenate([grid.z - grid.hz / 2, [grid.z[-1] + grid.hz / 2]])
+XU, ZU = np.meshgrid(xe, ze)
+jy = grid.ny // 2
+
+
+def uni_slice(arr):
+    """y = const slice of a k-major cell field, as (nz, nx)."""
+    return arr.reshape(grid.nz, grid.ny, grid.nx)[:, jy, :]
+
+
+# (a) the three input fields
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.2))
+for ax, (arr, ttl, clab, cm) in zip(
+    axes,
+    ((kappa_e, r"$\kappa_e$  (extinction)", r"$\kappa_e$  [m$^{-1}$]", "magma"),
+     (kappa_s, r"$\kappa_s$  (scattering)", r"$\kappa_s$  [m$^{-1}$]", "viridis"),
+     (g_cells, r"$g$  (HG asymmetry)", r"$g$  [-]", "cividis"))):
+    im = ax.pcolormesh(XU, ZU, uni_slice(arr), cmap=cm, shading="flat")
+    ax.set_xlabel(LBL_X)
+    ax.set_ylabel(LBL_Z)
+    ax.set_title(ttl)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=clab)
+fig.suptitle(rf"input fields on the ${grid.nx}^3$ unigrid, "
+             rf"$y = {grid.y[jy]:.3f}$ m slice (nearest row to $y = 0$;  "
+             rf"$\kappa_s = \omega_{{\rm local}}\,\kappa_e$, $\omega \leq 0.9$)")
+fig.tight_layout()
+fig.savefig("plot/manual_example_fields.png", dpi=140)
+plt.close(fig)
+
+# (b) the same slice on the octree leaves.  A plane through y = 0 coincides with
+# a cell face at *every* refinement level (the base lattice is anchored at -5
+# with h0 = 1.25), which would either leave holes or draw overlapping leaves;
+# offsetting by a quarter of the finest cell puts the plane strictly inside one
+# leaf per (x, z) column at all levels.
+h_min = 2.0 * oct_.half.min()
+y_slice = 0.0 + h_min / 4.0
+sel = np.abs(oct_.centers[:, 1] - y_slice) < oct_.half - 1e-12
+cs, hs = oct_.centers[sel], oct_.half[sel]
+x0, x1 = cs[:, 0] - hs, cs[:, 0] + hs
+z0, z1 = cs[:, 2] - hs, cs[:, 2] + hs
+verts = np.stack([np.column_stack([x0, z0]), np.column_stack([x1, z0]),
+                  np.column_stack([x1, z1]), np.column_stack([x0, z1])], axis=1)
+print(f"octree slice at y = {y_slice:.4f} m: {sel.sum()} leaves "
+      f"(finest cell {h_min:.4f} m)")
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.4))
+im0 = axes[0].pcolormesh(XU, ZU, uni_slice(kappa_e), cmap="magma", shading="flat")
+axes[0].set_title(rf"$\kappa_e$ on the unigrid  (${grid.nx}^3$)")
+axes[0].set_xlabel(LBL_X)
+axes[0].set_ylabel(LBL_Z)
+fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04,
+             label=r"$\kappa_e$  [m$^{-1}$]")
+
+pc = PolyCollection(verts, array=oct_.kappa_e[sel], cmap="magma",
+                    edgecolors="0.55", linewidths=0.25, antialiaseds=True)
+axes[1].add_collection(pc)
+axes[1].set_xlim(box.x0, box.x1)
+axes[1].set_ylim(box.z0, box.z1)
+axes[1].set_title(rf"$\kappa_e$ on the octree leaves ({sel.sum()} in slice)")
+axes[1].set_xlabel(LBL_X)
+axes[1].set_ylabel(LBL_Z)
+fig.colorbar(pc, ax=axes[1], fraction=0.046, pad=0.04,
+             label=r"$\kappa_e$  [m$^{-1}$]")
+
+norm_lvl = BoundaryNorm(np.arange(oct_.max_level + 2) - 0.5, oct_.max_level + 1)
+pl_ = PolyCollection(verts, array=oct_.level[sel], cmap="viridis", norm=norm_lvl,
+                     edgecolors="0.55", linewidths=0.25, antialiaseds=True)
+axes[2].add_collection(pl_)
+axes[2].set_xlim(box.x0, box.x1)
+axes[2].set_ylim(box.z0, box.z1)
+axes[2].set_title(rf"octree refinement level ($h = h_0/2^\ell$, $h_0 = {oct_.h0}$ m)")
+axes[2].set_xlabel(LBL_X)
+axes[2].set_ylabel(LBL_Z)
+cb = fig.colorbar(pl_, ax=axes[2], fraction=0.046, pad=0.04,
+                  ticks=np.arange(oct_.max_level + 1), label="level  \u2113")
+cb.set_ticklabels([f"{l}  ({oct_.h0 / 2**l:g} m)" for l in range(oct_.max_level + 1)])
+fig.suptitle(rf"octree slice at $y = {y_slice:.3f}$ m   "
+             rf"($\tau_{{\max}} = 2.0$, $\varepsilon = 1.0$, "
+             rf"$n_{{\rm leaf}} = {oct_.n_leaf}$)")
+fig.tight_layout()
+fig.savefig("plot/manual_example_octree.png", dpi=140)
+plt.close(fig)
+
+# (c) mean intensity J: slice + band-mean profiles
 fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-im = axes[0].imshow(J4[:, grid.ny // 2, :], origin="lower", aspect="auto",
-                    extent=[box.x0, box.x1, box.z0, box.z1])
-axes[0].set_xlabel("x"); axes[0].set_ylabel("z")
-axes[0].set_title("J, y=0 slice (unigrid)")
-plt.colorbar(im, ax=axes[0])
+im = axes[0].pcolormesh(XU, ZU, J4[:, jy, :], cmap="viridis", shading="flat")
+axes[0].set_xlabel(LBL_X)
+axes[0].set_ylabel(LBL_Z)
+axes[0].set_title(r"$J$, $y = 0$ slice (unigrid)")
+fig.colorbar(im, ax=axes[0], fraction=0.046, pad=0.04, label=r"$J\,/F_0$")
 axes[1].plot(zb_uni, zc, label="unigrid 24$^3$")
 axes[1].plot(zb_oct, zc, "--", label="octree")
-axes[1].set_xlabel("band-mean J"); axes[1].set_ylabel("z")
+axes[1].set_xlabel(r"band-mean $J\,/F_0$")
+axes[1].set_ylabel(LBL_Z)
 axes[1].legend()
+fig.tight_layout()
 fig.savefig("plot/manual_example_j.png", dpi=120)
+plt.close(fig)
 
+# (d) all-sky images, one per upward ordinate, with a shared colour scale
 sky = allsky(grid, res["I"], dg, face="top")
 n_out = sky["omega"].shape[0]
-fig, axes = plt.subplots(6, 7, figsize=(12, 10))
-mx = max(sky["images"].max(), 1e-12)
-for a, img in zip(axes.ravel(), sky["images"]):
-    a.imshow(img, origin="lower", vmin=0, vmax=mx, cmap="inferno")
-    a.set_xticks([]); a.set_yticks([])
-for a in axes.ravel()[n_out:]:
-    a.axis("off")
-fig.suptitle("all-sky outgoing intensity at top face (42 ordinates)")
-fig.savefig("plot/manual_example_allsky.png", dpi=120)
+ncol, nrow = 7, int(np.ceil(n_out / 7))
+fig, axes = plt.subplots(nrow, ncol, figsize=(1.7 * ncol + 1.2, 1.9 * nrow + 1.0))
+norm_sky = Normalize(vmin=0, vmax=max(sky["images"].max(), 1e-12))
+ext = [box.x0, box.x1, box.y0, box.y1]
+last = None
+for r in range(nrow):
+    for cc in range(ncol):
+        ax, k = axes[r, cc], r * ncol + cc
+        if k >= n_out:
+            ax.axis("off")
+            continue
+        last = ax.imshow(sky["images"][k], origin="lower", norm=norm_sky,
+                         cmap="inferno", extent=ext)
+        ax.set_title(rf"$\mu = \cos\vartheta = {sky['omega'][k, 2]:.2f}$", fontsize=7)
+        if r < nrow - 1:
+            ax.set_xticklabels([])
+        if cc > 0:
+            ax.set_yticklabels([])
+        ax.tick_params(labelsize=6)
+axes[0, 0].set_ylabel(LBL_Y, fontsize=8)
+axes[-1, 0].set_xlabel(LBL_X, fontsize=8)
+fig.subplots_adjust(right=0.88, hspace=0.45, wspace=0.25)
+cax = fig.add_axes([0.90, 0.08, 0.02, 0.80])
+fig.colorbar(last, cax=cax, label=r"$I\,/F_0$  [sr$^{-1}$]")
+fig.suptitle(rf"all-sky outgoing intensity at the top face "
+             rf"({n_out} upward ordinates of the {dg.n_dir})")
+fig.savefig("plot/manual_example_allsky.png", dpi=140)
+plt.close(fig)
+
+# ---------------------------------------------------------------- 3D view
+# pyvista is optional:  mamba install -n pyarts -c conda-forge pyvista
+# (pulls vtk).  Everything above runs without it.
+try:
+    import pyvista as pv
+except ImportError:
+    pv = None
+    print("pyvista not installed - skipping the 3D figure")
+
+if pv is not None:
+    # sample the piecewise-constant octree fields on the lattice of finest-cell
+    # centres: exact, because every lattice point lies strictly inside one leaf
+    nl = (np.array([box.Lx, box.Ly, box.Lz]) / h_min).astype(int)
+    gx = box.x0 + (np.arange(nl[0]) + 0.5) * h_min
+    gy = box.y0 + (np.arange(nl[1]) + 0.5) * h_min
+    gz = box.z0 + (np.arange(nl[2]) + 0.5) * h_min
+    P = np.stack(np.meshgrid(gx, gy, gz, indexing="ij"), axis=-1).reshape(-1, 3)
+    li = oct_.locate(P)
+    lat = pv.ImageData(dimensions=tuple(int(v) for v in nl),
+                       origin=(gx[0], gy[0], gz[0]), spacing=(h_min,) * 3)
+    lat.point_data["J"] = res_oct["J"][li]
+    lat.point_data["kappa_e"] = oct_.kappa_e[li]
+    print(f"3D lattice {tuple(int(v) for v in nl)} at {h_min:g} m: "
+          f"J {lat['J'].min():.3f}..{lat['J'].max():.3f}, "
+          f"kappa_e {lat['kappa_e'].min():.3f}..{lat['kappa_e'].max():.3f}")
+
+    iso_levels = [0.5, 1.0, 2.0, 3.0]
+    iso_cols = [(0.75, 0.85, 1.0), (0.55, 0.7, 1.0),
+                (0.35, 0.5, 0.95), (0.2, 0.3, 0.85)]
+    pv.OFF_SCREEN = True
+    views = []
+    for az, el, what in ((40, 18, "iso"), (-140, 14, "vol")):
+        plotter = pv.Plotter(off_screen=True, window_size=(760, 640))
+        if what == "iso":
+            for lev, col in zip(iso_levels, iso_cols):
+                plotter.add_mesh(lat.contour(isosurfaces=[lev], scalars="kappa_e"),
+                                 color=col, opacity=0.35, specular=0.5,
+                                 specular_power=25)
+        else:
+            # opacity increases toward low J, so the cloud shadow is the dense
+            # part of the volume; the scalar bar is added by matplotlib below
+            plotter.add_volume(lat, scalars="J", cmap="inferno",
+                               opacity=np.linspace(0.10, 0.0, 24), shade=False,
+                               mapper="smart", show_scalar_bar=False)
+        plotter.add_mesh(pv.Box(bounds=(box.x0, box.x1, box.y0, box.y1,
+                                        box.z0, box.z1)),
+                         style="wireframe", color="black", line_width=1.0)
+        plotter.reset_camera()
+        plotter.camera.azimuth, plotter.camera.elevation = az, el
+        plotter.camera.zoom(0.92)
+        views.append(plotter.screenshot(return_img=True))
+        plotter.close()
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.4, 5.6))
+    for ax, img in zip(axes, views):
+        ax.imshow(img)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    axes[0].set_title(r"$\kappa_e$ isosurfaces at 0.5, 1, 2, 3 m$^{-1}$"
+                      "\n(octree staircase visible)")
+    axes[1].set_title(r"$J$ volume rendering"
+                      "\n(opacity increases toward low $J$)")
+    fig.subplots_adjust(right=0.88, wspace=0.05)
+    cax = fig.add_axes([0.90, 0.12, 0.02, 0.72])
+    smap = plt.cm.ScalarMappable(cmap="inferno",
+                                 norm=Normalize(vmin=lat["J"].min(),
+                                                vmax=lat["J"].max()))
+    fig.colorbar(smap, cax=cax, label=r"$J\,/F_0$")
+    fig.savefig("plot/manual_example_3d.png", dpi=140)
+    plt.close(fig)
 ```
 
-Verified output (this machine; wall times vary a few %):
+Verified output (measured on macOS/arm64 with the pyarts interpreter; the
+iteration counts and all physics numbers are machine-independent, wall times
+are not — the same run on the Windows machine takes 4.2 s / 107.0 s):
 
 ```text
-N_dir = 42,  sum(w) - 4pi = -1.776e-15
-unigrid:  n_iter=32, converged=True, wall=4.23 s
+N_dir = 42,  sum(w) - 4pi = -7.105e-15
+unigrid:  n_iter=32, converged=True, wall=1.64 s
 octree:   n_leaf=25264, max_level=3
-octree:   n_iter=30, converged=True, wall=107.00 s
+leaves per level: L0: 316, L1: 788, L2: 3680, L3: 20480
+octree:   n_iter=30, converged=True, wall=38.75 s
 z      J_unigrid  J_octree  rel.diff
  0.62     0.4372    0.3095     29.2%
  3.12     0.4529    0.3431     24.2%
@@ -1006,20 +1212,54 @@ z      J_unigrid  J_octree  rel.diff
 top-of-domain mean F_z: unigrid -2.5215, octree -2.5312
   diffuse closure residual      9.49  (2.96% of diffuse input)
 pointwise div F vs heating (interior): rms 1.6%, max 13.9% of max|heating|
+octree slice at y = 0.0391 m: 796 leaves (finest cell 0.1562 m)
+3D lattice (64, 64, 64) at 0.15625 m: J 0.064..0.608, kappa_e 0.000..3.876
 ```
 
 ### Figures produced
 
-Mean intensity $J$: left — $y = 0$ slice through the cloud on the unigrid;
-right — band-mean $J$ profiles, unigrid $24^3$ vs octree (the difference is the
-unigrid grazing-ordinate stencil error, anchor 5):
+**Input fields** — $\kappa_e$, $\kappa_s$ and $g$ on the $y = 0.208$ m row of
+the $24^3$ unigrid (the nearest cell row to $y = 0$), drawn as `pcolormesh`
+over the *cell edges* so the cell structure is visible. $\kappa_s =
+\omega_{\mathrm{local}}\kappa_e$ with the $\omega \le 0.9$ cap flattens the
+scattering panel at the cloud core; $\kappa_e$ peaks at $\approx 3.9$ m$^{-1}$
+(column $\tau = 10$) and $g$ at $\approx 0.95$ ($= 1/1.05$):
+
+![Input fields kappa_e, kappa_s and g on the unigrid, y = 0 slice, with units](plot/manual_example_fields.png)
+
+**The octree grid itself** — the same $\kappa_e$ field on the actual leaves.
+Left: unigrid. Middle: the 796 leaves cut by the plane $y = 0.039$ m, drawn as
+one `PolyCollection`. Right: the refinement level $\ell$ of those leaves, with
+the colourbar labelled by the cell size $h_0/2^\ell$. The staircase is the
+octree doing its job — $h = 1.25$ m in the vacuum tails, $0.156$ m inside the
+cloud, for 25 264 leaves instead of the $24^3 = 13824$ unigrid cells:
+
+![kappa_e on the unigrid, kappa_e on the octree leaves, and the octree refinement level, same y slice](plot/manual_example_octree.png)
+
+**Mean intensity $J$** — left: $y = 0$ slice through the cloud on the unigrid,
+colourbar $J/F_0$; right: band-mean $J$ profiles, unigrid $24^3$ vs octree (the
+difference is the unigrid grazing-ordinate stencil error, anchor 5):
 
 ![Mean intensity J: y=0 slice (unigrid, left) and band-mean J profiles unigrid vs octree (right)](plot/manual_example_j.png)
 
-All-sky outgoing intensity at the top face — one image per upward ordinate
-(21 upward ordinates of the 42-ordinate development grid):
+**All-sky outgoing intensity at the top face** — the 21 upward ordinates of the
+42-ordinate development grid, each panel labelled with $\mu = \cos\vartheta$,
+one shared colour scale $I/F_0$ [sr$^{-1}$], axes in m. The dark blobs are the
+cloud shadow seen at the corresponding slant; the bright diagonal bands are the
+forward-scattering lobe of the $30^\circ$ beam ($g \approx 0.95$):
 
-![All-sky outgoing intensity at the top face, one image per upward ordinate](plot/manual_example_allsky.png)
+![All-sky outgoing intensity at the top face, one image per upward ordinate, with mu labels and a labelled colourbar](plot/manual_example_allsky.png)
+
+**3D view of the simulation** (pyvista, off-screen; install command in the code
+block above) —
+left: $\kappa_e$ isosurfaces at 0.5, 1, 2, 3 m$^{-1}$, nested, with the octree
+staircase still visible on the surfaces. Right: volume rendering of $J$ with
+the opacity transfer function *inverted* (low $J$ $\to$ high opacity), so the
+dense dark core is the radiation shadow of the cloud and the beam path lights
+up around it. Both panels come from the octree solution resampled onto the
+$64^3$ lattice of finest-cell centres (§11 code), domain box outlined:
+
+![3D view: kappa_e isosurfaces and a volume rendering of J from the octree solution](plot/manual_example_3d.png)
 
 Interpreting the result dict and the diagnostics:
 
@@ -1038,9 +1278,12 @@ Interpreting the result dict and the diagnostics:
   **2.96%** of the incident diffuse power — the discretization error of the
   42-ordinate / $24^3$ solve, not a conservation bug.
 - **pointwise div F vs heating**: rms 1.6% of max|heating| — anchor 4.
-- Figures: `plot/manual_example_j.png` (J slice + profile),
+- Figures: `plot/manual_example_fields.png` (input fields $\kappa_e$, $\kappa_s$,
+  $g$), `plot/manual_example_octree.png` (same slice on the octree leaves + the
+  refinement levels), `plot/manual_example_j.png` (J slice + profile),
   `plot/manual_example_allsky.png` (21 upward-ordinate all-sky images at the
-  top face).
+  top face), `plot/manual_example_3d.png` (pyvista $\kappa_e$ isosurfaces +
+  $J$ volume). All axes and colourbars carry the units of the convention above.
 
 ## 12. Runner scripts
 
@@ -1248,7 +1491,8 @@ does not remove. The solver always uses exact characteristics
   and reused.
 - Full Ng cloud run ($24^3$, ground + beam) at **642 ordinates ≈ 84 s**
   (phase 6 record); the §11 example: unigrid 42 ordinates ≈ 4 s, octree
-  (25 264 leaves) ≈ 100 s.
+  (25 264 leaves) ≈ 100 s — both on the Windows machine; the §11 macOS run is
+  ~2.5× faster.
 - The octree DDA march cost grows with the *finest* cell size (the step
   budget scales as $\text{path}/h_{\min}$), so very deep octrees
   (max_depth ≥ 4 with small $h_0$) get disproportionately expensive — the
