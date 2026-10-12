@@ -49,6 +49,7 @@ def lambda_iteration(
     tol=1e-8,
     ng=None,
     delta_M=0,
+    transport="chain",
 ):
     """
     Plain lambda iteration for the monochromatic RTE.
@@ -99,6 +100,16 @@ def lambda_iteration(
         depth changes.  M = 1 is recommended for g >~ 0.5.  Octree
         refinement is unaffected: it runs outside the solver on the
         physical kappa_e.
+    transport : {"chain", "sc"}, optional
+        Unigrid transport algorithm, by default "chain" (the lattice-
+        stencil chain sweeps of rt3d.characteristics).  "sc" selects the
+        independent single-cell short-characteristics sweeps of
+        rt3d.short_characteristics (plan/plan-sc-unigrid.md): bilinear
+        4-point face interpolation, wrap-around passes on periodic entry
+        axes.  More diffusive on coarse grids (path error ~linear in
+        cell size), but local and gather-only.  Ignored on the octree
+        (exact marches); transport="sc" with an octree grid raises
+        ValueError.
 
     Returns
     -------
@@ -114,6 +125,7 @@ def lambda_iteration(
         'delta_M'  int, delta-M order used (0 = off)
         'kappa_e_delta' (n_cells,) extinction actually used for the
                    transport; equals kappa_e when delta_M == 0
+        'transport' str, transport algorithm used ("chain" or "sc")
     """
     from rt3d.octree import octree_grid
 
@@ -178,10 +190,28 @@ def lambda_iteration(
     # The octree sweep follows exact characteristics (precomputed backward
     # marches); the approximate center-to-center chain (build_chain_octree)
     # showed non-converging path errors in heterogeneous 3D fields.
+    # On the unigrid the solver option `transport` selects between the
+    # lattice-stencil chains ("chain", default) and the independent
+    # single-cell short-characteristics sweeps ("sc",
+    # rt3d.short_characteristics, plan/plan-sc-unigrid.md).
+    if transport not in ("chain", "sc"):
+        raise ValueError(f"transport must be 'chain' or 'sc', got {transport!r}")
     if is_octree:
+        if transport == "sc":
+            raise ValueError(
+                "transport='sc' is only available on the unigrid; the "
+                "octree sweep follows exact characteristic marches"
+            )
         chains = [
             precompute_octree_march(grid, dg.directions[d],
                                     periodic_box=periodic_box)
+            for d in range(dg.n_dir)
+        ]
+    elif transport == "sc":
+        from rt3d.short_characteristics import build_sc_chain
+
+        chains = [
+            build_sc_chain(grid, dg.directions[d], periodic_box=periodic_box)
             for d in range(dg.n_dir)
         ]
     else:
@@ -219,48 +249,47 @@ def lambda_iteration(
     history = []
     converged = False
     I = np.zeros((n_cells, dg.n_dir))
+
+    def sweep_one(d, bottom_I=None):
+        """One ordinate sweep with the selected transport method; the
+        ground ordering, Ng, delta-M and the scattering matmul above are
+        method-agnostic and shared."""
+        if is_octree:
+            return sweep_direction_octree_exact(
+                grid, chains[d], kappa_e_delta, S[:, d], bc, bottom_I=bottom_I
+            )
+        if transport == "sc":
+            from rt3d.short_characteristics import sweep_direction_sc
+
+            return sweep_direction_sc(
+                grid, chains[d], kappa_e_delta, S[:, d], bc, bottom_I=bottom_I
+            )
+        return sweep_direction(
+            grid, chains[d], kappa_e_delta, S[:, d], bc, bottom_I=bottom_I
+        )
+
     for it in range(n_iter):
         if ground is None:
-            for d, chain in enumerate(chains):
-                if is_octree:
-                    I[:, d] = sweep_direction_octree_exact(
-                        grid, chain, kappa_e_delta, S[:, d], bc
-                    )
-                else:
-                    I[:, d] = sweep_direction(
-                        grid, chain, kappa_e_delta, S[:, d], bc
-                    )
+            for d in range(dg.n_dir):
+                I[:, d] = sweep_one(d)
         else:
             # downward ordinates first: they set the ground inflow
             for d in dg.down_idx:
-                chain = chains[d]
-                if is_octree:
-                    I[:, d] = sweep_direction_octree_exact(
-                        grid, chain, kappa_e_delta, S[:, d], bc
-                    )
-                else:
-                    I[:, d] = sweep_direction(
-                        grid, chain, kappa_e_delta, S[:, d], bc
-                    )
+                I[:, d] = sweep_one(d)
             I_g = I_g_fixed.copy()
             I_g[mb] += ground.albedo * downward_irradiance(
                 I[:, dg.down_idx], dg
             )[mb] / np.pi
             for d in dg.up_idx:
-                chain = chains[d]
                 if is_octree:
-                    I[:, d] = sweep_direction_octree_exact(
-                        grid, chain, kappa_e_delta, S[:, d], bc,
-                        bottom_I=I_g[chain["entry_cell"]],
-                    )
+                    I[:, d] = sweep_one(d, bottom_I=I_g[chains[d]["entry_cell"]])
                 else:
                     # ground radiance is a column field: chains with
-                    # |s_z| > 1 root above the bottom layer, so the k = 0
-                    # values must tile over all layers for bottom-entry
-                    # roots
-                    I[:, d] = sweep_direction(
-                        grid, chain, kappa_e_delta, S[:, d], bc,
-                        bottom_I=np.tile(I_g[: grid.ny * grid.nx], grid.nz),
+                    # |s_z| > 1 root above the bottom layer (and SC stencil
+                    # nodes clamp to k = 0), so the k = 0 values must tile
+                    # over all layers for bottom-entry inflow
+                    I[:, d] = sweep_one(
+                        d, bottom_I=np.tile(I_g[: grid.ny * grid.nx], grid.nz)
                     )
         S_new = scattering_source(
             I, dg, omega, B, Phi_w=Phi_w, g=g if g_cells is None else 0.0,
@@ -286,4 +315,5 @@ def lambda_iteration(
         "converged": converged,
         "delta_M": int(delta_M),
         "kappa_e_delta": kappa_e_delta,
+        "transport": transport,
     }

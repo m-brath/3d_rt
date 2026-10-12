@@ -17,6 +17,7 @@ Code under discussion:
 | `rt3d/octree.py` | `octree_grid`, `march_octree` (DDA on the octree), `node_major_segments` |
 | `rt3d/characteristics.py` | `build_chain` (unigrid), `build_chain_octree` (reference), stencils, sub-segments |
 | `rt3d/transport.py` | `boundary_conditions`, `sweep_direction`, `sweep_all`, `precompute_octree_march`, `sweep_direction_octree_exact`, beam optical depths |
+| `rt3d/short_characteristics.py` | alternative unigrid transport: `sc_stencil`, `build_sc_chain`, `sweep_direction_sc`, `sweep_all_sc` (selected via `transport="sc"`, §12) |
 | `rt3d/solver.py` | `lambda_iteration` — drives the sweeps |
 
 ---
@@ -541,6 +542,118 @@ From `AGENTS.md` / MANUAL §14 — which sweep property each anchors:
 | 4 | $\nabla\cdot F$ = heating rate from $I$ — quadrature + sweep energy consistency | MANUAL §11 worked example |
 | 5 | octree result converges to the unigrid result on the Gaussian cloud — both transport paths agree in the refinement limit | `scripts/phase3_octree.py` |
 
+Anchor 3 is exact for the chain and exact-octree sweeps (true-ray
+characteristics). For `transport="sc"` (§12) it holds to machine precision
+for $z$-entry ordinates only; oblique ordinates carry a bounded,
+resolution-independent angular stencil error
+(`tests/test_short_characteristics.py::test_transmittance_staircase_error`).
+
 Figure regeneration: `scripts/sc_transport_figures.py` →
 `plot/sc_stencil_lattice.png`, `sc_subsegments.png`, `sc_bfs_waves.png`,
 `sc_octree_march.png`, `sc_block_prefixes.png`.
+
+---
+
+## 12. Unigrid short characteristics (`transport="sc"`)
+
+Files: `short_characteristics.sc_stencil` + `build_sc_chain` +
+`sweep_direction_sc` / `sweep_all_sc`; selected through
+`solver.lambda_iteration(..., transport="sc")` (default `"chain"` = §3).
+A second, **independent** transport algorithm for the unigrid, modelled on
+the DOIT solver of ARTS (plan/plan-sc-unigrid.md); the chain code is
+untouched and the two can be compared run by run on identical grids.
+
+### 12.1 Stencil (precomputed once per ordinate)
+
+Back from a cell center along $-\boldsymbol\Omega$, the first cell face
+crossed is the same for every cell:
+
+$$
+a = \arg\max_\text{axes} \frac{|\Omega_a|}{h_a},\qquad
+t_f = \frac{h_a}{2|\Omega_a|},\qquad
+p = c_\text{center} - t_f\,\boldsymbol\Omega .
+$$
+
+Since $a$ maximises $|\Omega_a|/h_a$, the lateral offset of $p$ obeys
+$|p - \text{center}|_\text{lateral} \le h_b/2$, so $p$ always lies inside
+the 4-ring of cell centers around the upwind cell
+$u = (i,j,k) - \operatorname{sign}(\Omega_a)\boldsymbol e_a$ in the face
+plane — the bilinear 4-point stencil (offsets + weights, identical for
+every cell) is always well-defined, also for $h_z \ne h_x$.
+
+### 12.2 Two-segment formal solution
+
+The characteristic is **two segments of length $t_f$ each**: a *gap
+segment* from each upwind stencil node along $+\boldsymbol\Omega$ (it
+lands exactly in the entry-face plane and stays inside the node's own
+cell), then the *target segment* from $p$ to the target center:
+
+$$
+I_c = e^{-\kappa_{e,c} t_f} \sum_m w_m \hat I_m
+      + S_c\left(1 - e^{-\kappa_{e,c} t_f}\right),\qquad
+\hat I_m = I_{u_m} e^{-\kappa_{e,u_m} t_f}
+          + S_{u_m}\left(1 - e^{-\kappa_{e,u_m} t_f}\right).
+$$
+
+The gap segment is **not optional**: without it the four bilinear nodes
+all sit strictly upwind of $p$, the "interpolation" degenerates to an
+extrapolation, and the face → upwind-center half cell is never
+integrated. Measured on the homogeneous slab (42 ordinates, refinement
+8 → 16 → 32): the transmittance error is then O(1) and *scale-invariant*
+($\tau$ effectively halved for $z$-entry ordinates). With the gap
+segment, $z$-entry ordinates reproduce $e^{-\kappa_e s}$ to machine
+precision (anchor 3 holds for them); oblique ($x/y$-entry) ordinates
+keep a bounded angular stencil error of the same character as the chain
+method's grazing-ordinate error — it does **not** shrink with $h$,
+because the discrete recursion's effective direction is set by the
+bilinear weights, not by $\boldsymbol\Omega$ (`tests/test_short_characteristics.py::test_transmittance_staircase_error`).
+
+### 12.3 Layer sweep and wrap-around passes
+
+The whole stencil lies in the already-computed upwind layer, so the sweep
+is a layer loop along the entry axis $a$ in propagation order, vectorized
+over the layer plane (4 gathers + weights per layer). Entry axis $z$ is
+trivially well-ordered. For a periodic entry axis ($x/y$, ~2/3 of the
+ordinates) the layer dependency forms a **ring** across the wrap, solved
+by repeated Gauss–Seidel passes until the wrap feed stops changing
+(`wrap_tol`), capped at `max(4 n_a, 64)` passes. The ring-circuit
+operator has spectral radius $< 1$ (every pass drifts in $z$ — the
+same-layer bilinear weight is $1 - s_z < 1$ — and $z$ exits through
+top/bottom); with $\kappa_e > 0$ in the ring the gain carries an extra
+$e^{-2\kappa t_f n_a}$ and 1–3 passes suffice. In near-vacuum rings with
+grazing ordinates the gain $(1-s_z)^{n_a}$ can approach 1 and tens of
+passes are needed; the cap then truncates the multi-circuit contribution
+(the plan's original $n_a$-pass cap rested on a pure-shift exactness
+argument that does not hold for the bilinear stencil).
+
+### 12.4 Boundary conditions and ground
+
+Stencil nodes outside the domain take `bc.top_I / bottom_I / side_I`
+(same `boundary_conditions` class; the inflow sits at the domain face, so
+boundary nodes get no gap propagation). Bottom-out nodes clamp to
+$k = 0$, so the phase-5 Lambertian ground passes through as the tiled
+`bottom_I` column field exactly as for the chain sweep; solver ordering
+(downward ordinates first, rebuild $I_g$) is unchanged.
+
+### 12.5 Trade-offs vs. the chain method
+
+* Local and gather-only — no sub-segment tables, no BLAS matmul needed.
+* More diffusive on coarse grids; oblique-ordinate path error is bounded
+  but resolution-independent (§12.2), like the chain method's
+  grazing-ordinate error but reached differently.
+* Wrap-around passes add up to `max(4 n_a, 64)`× sweep cost per
+  ordinate in vacuum; negligible when the ring is optically thick.
+
+### `short_characteristics.build_sc_chain` — one dict per ordinate
+
+| key | shape / type | meaning |
+|---|---|---|
+| `a`, `sigma` | int | entry axis and propagation sense along it |
+| `t_f` | float | segment length (node → face plane, face plane → center) |
+| `weights` | (4,) float | bilinear stencil weights, sum 1 |
+| `order` | (n_cells,) int | cell indices grouped by layer, sweep order |
+| `slices` | list of (start, stop) | layer boundaries inside `order` |
+| `node_idx` | (4, n_cells) int | stencil-node indices (out-of-domain clamped) |
+| `node_face` | (4, n_cells) int8 | 0 interior, 1 top, 2 bottom, 3 side |
+| `wrap` | bool | entry axis periodic → wrap-around passes |
+| `n_layers` | int | layers along the entry axis |
