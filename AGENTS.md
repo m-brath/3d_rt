@@ -86,6 +86,7 @@ installing them into `pyarts` and saying so explicitly.
   plot/           currently empty — figure and image output goes here
   plan/           all plans live here (plan.md: agreed design, phase breakdown
                   and decisions log; additional plans as separate files)
+  docs/           detailed technical documentation (e.g. sc-transport.md)
   AGENTS.md       this file
   .gitignore      Visual Studio template
   .gitattributes  "* text=auto" (LF normalization)
