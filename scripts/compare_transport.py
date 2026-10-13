@@ -415,6 +415,26 @@ np.savetxt(os.path.join(OUT, "toa_mean_radiance.csv"),
            delimiter=",", fmt="%.6f",
            header="mu," + ",".join(k for k, *_ in RUNS), comments="")
 
+# %% quantitative pair statistics (B - A), quoted in docs/compare-transport.md
+print("\npair (B - A)                     field   max rel diff   mean rel diff")
+pair_rows = []
+for a, b, ttl in PAIRS:
+    for name in ("J", "var"):
+        d, rel = diff_stats(a, b, name)
+        mean_rel = (d / max(np.abs(lat[a][name]).max(), 1e-30)).mean()
+        pair_rows.append((ttl, name, rel, mean_rel))
+        print(f"{ttl:31s} {name:5s}  {rel * 100:9.1f}%   {mean_rel * 100:11.2f}%")
+    d = np.abs(fup[b] - fup[a])
+    rel = d.max() / max(fup[a].max(), 1e-30)
+    mean_rel = (d / max(fup[a].max(), 1e-30)).mean()
+    pair_rows.append((ttl, "F_plus_TOA", rel, mean_rel))
+    print(f"{ttl:31s} F+    {rel * 100:9.1f}%   {mean_rel * 100:11.2f}%")
+
+with open(os.path.join(OUT, "pair_stats.csv"), "w") as fh:
+    fh.write("pair,field,max_rel_diff,mean_rel_diff\n")
+    for ttl, name, rel, mean_rel in pair_rows:
+        fh.write(f'"{ttl}",{name},{rel:.6f},{mean_rel:.6f}\n')
+
 # %% interactive 3D scenes (self-contained vtk.js HTML, offline viewer)
 import pyvista as pv
 
