@@ -73,9 +73,14 @@ between machines; confirm with the sanity check below):
 | xarray | 2026.7.0 |
 | h5py | 3.16.0 |
 | pyarts3 | 3.0.0.dev10 |
+| pytest | 9.1.1 |
+| pyvista | 0.49.1 (with vtk) |
+| trame-pyvista | 0.2.0 (pyvista vtk.js/HTML scene export) |
 
-**Not installed:** `pytest`, `numba`, `pyvista`. Do not import them without first
-installing them into `pyarts` and saying so explicitly.
+**Not installed:** `numba`. Do not import it — or any other new dependency —
+without first installing it into `pyarts` and saying so explicitly.
+(`trame-pyvista` was installed 2026-10-13 for the interactive HTML 3D exports
+of `scripts/compare_transport.py`.)
 
 ## Repository layout
 
@@ -166,8 +171,8 @@ anything run non-interactively, and write figures into `plot/`.
 
 Hard rules when delegating to subagents:
 
-- **At most 2 subagents running in parallel.** Never launch a third concurrent subagent.
-  If more work needs parallelizing, batch it into two subagents or do it inline.
+- **At most 1 subagent running at a time.** Never launch a second concurrent subagent.
+  If more work needs parallelizing, batch it into a single subagent or do it inline.
 - **Never reuse a subagent.** Always start a fresh subagent conversation — do not pass a
   `sessionID` to continue an earlier one, and do not treat a previous subagent's final
   answer as authoritative context for a new task. Each subagent call must carry all the
