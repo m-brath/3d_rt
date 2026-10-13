@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Diagnostics (plan section 6): heating rate, flux divergence, global energy
-balance, all-sky output images.
+balance, all-sky output images, angular variance of the intensity.
 
 Energy conservation (validation anchor 4): from the RTE,
 
@@ -51,6 +51,32 @@ def flux_divergence(grid, F):
     dFz[0] = (F4[1, :, :, 2] - F4[0, :, :, 2]) / dz
     dFz[-1] = (F4[-1, :, :, 2] - F4[-2, :, :, 2]) / dz
     return (dFx + dFy + dFz).reshape(grid.n_cells)
+
+
+def angular_variance(I, dg):
+    """
+    Angular variance of the intensity around the mean intensity, per cell:
+
+        sigma^2(r) = (1/4pi) * int (I(r, Omega) - J(r))^2 dOmega
+                   ~ (1/4pi) * sum_i w_i (I_i - J)^2
+
+    Zero for an isotropic field; measures the angular anisotropy of the
+    radiation field on the ordinate quadrature (units of I^2).  For a field
+    I = J + a * Omega_z on an isotropic direction grid this is ~ a^2 / 3.
+
+    Parameters
+    ----------
+    I : (n_cells, N_dir) ndarray
+        Cell-center intensities per ordinate.
+    dg : rt3d.directions.direction_grid
+
+    Returns
+    -------
+    (n_cells,) ndarray
+    """
+    I = np.asarray(I, dtype=float)
+    J = mean_intensity(I, dg)
+    return ((I - J[:, None]) ** 2 * dg.weights).sum(axis=1) / (4.0 * np.pi)
 
 
 def _face_mu_flux(I, dg, idx):
