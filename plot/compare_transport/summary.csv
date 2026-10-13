@@ -1,0 +1,7 @@
+run,transport,delta_M,n_iter,converged,wall_s,mean_J,mean_Fz_TOA
+uni_chain_dM0,chain,0,32,1,1.727,0.518767,-2.521530
+uni_chain_dM1,chain,1,12,1,0.784,0.518845,-2.521351
+uni_sc_dM0,sc,0,51,1,18.039,0.463235,-2.593460
+uni_sc_dM1,sc,1,12,1,4.377,0.463287,-2.593349
+octree_dM0,chain,0,30,1,42.860,0.401422,-2.531179
+octree_dM1,chain,1,12,1,23.892,0.401604,-2.530840

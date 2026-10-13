@@ -399,3 +399,6 @@ FodyWeavers.xsd
 
 # macOS
 .DS_Store
+
+# regeneratable interactive vtk.js scene exports (scripts/compare_transport.py)
+plot/compare_transport/scene_*.html
