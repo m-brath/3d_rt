@@ -75,7 +75,7 @@ between machines; confirm with the sanity check below):
 | pyarts3 | 3.0.0.dev10 |
 | pytest | 9.1.1 |
 | pyvista | 0.49.1 (with vtk) |
-| trame-pyvista | 0.2.0 (pyvista vtk.js/HTML scene export) |
+| trame-pyvista | 0.2.1 (pyvista vtk.js/HTML scene export; installed 2026-10-13 on macOS, 2026-10-14 on Windows) |
 
 **Not installed:** `numba`. Do not import it — or any other new dependency —
 without first installing it into `pyarts` and saying so explicitly.
