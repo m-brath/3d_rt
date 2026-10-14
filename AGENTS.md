@@ -74,6 +74,7 @@ between machines; confirm with the sanity check below):
 | h5py | 3.16.0 |
 | pyarts3 | 3.0.0.dev10 |
 | pytest | 9.1.1 |
+| markdown | 3.11.1 (md→HTML for the browser print-to-PDF doc regeneration) |
 | pyvista | 0.49.1 (with vtk) |
 | trame-pyvista | 0.2.1 (pyvista vtk.js/HTML scene export; installed 2026-10-13 on macOS, 2026-10-14 on Windows) |
 
