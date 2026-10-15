@@ -29,8 +29,10 @@ Diagnostics per run: mean intensity J, angular variance of the intensity
 per-ordinate domain-mean radiance).  All fields are sampled onto one common
 64^3 lattice (finest octree cell) so every pair of runs is directly
 comparable.  Interactive 3D scenes are exported as self-contained vtk.js
-HTML (pyvista trame export: orbit / actor toggling / colour maps in the
-browser, no server needed to view).
+HTML (pyvista trame export) with an injected control panel: sliders for the
+x/y/z slice-plane positions and for the isosurface level (precomputed
+snapshots toggled client-side), scalar and visibility toggles, orbit/zoom in
+the browser, no server needed to view.
 
 Run from the repo root:
     macOS/Linux:  ~/miniforge3/envs/pyarts/bin/python scripts/compare_transport.py
@@ -43,6 +45,7 @@ incident beam flux F0 = 1.
 
 # %% imports and configuration
 import asyncio
+import json
 import os
 import sys
 import time
@@ -679,31 +682,228 @@ def lattice_image(key):
     return img
 
 
-ISO_LEVELS = [0.5, 1.0, 2.0, 3.0]
-ISO_COLS = [(0.75, 0.85, 1.0), (0.55, 0.7, 1.0), (0.35, 0.5, 0.95), (0.2, 0.3, 0.85)]
-SLICES = [("x", (0.0, 0.0, 0.0), "x = 0"),
-          ("y", (0.0, 0.0, 0.0), "y = 0"),
-          ("z", (0.0, 0.0, 4.0), "z = 4")]
+# --- interactive scene configuration: precomputed slider snapshots.  The
+# exported vtk.js scene is static, so slice planes and isosurfaces are baked
+# at N_SLICE positions per axis / N_ISO levels; the injected HTML control
+# panel (PANEL_JS below) toggles the corresponding actors at runtime.
+N_SLICE = 25
+N_ISO = 15
+SLICE_STRIDE = 2          # slice planes taken every 2nd lattice plane
+
+AXES = ("x", "y", "z")
+NRM = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}
+
+
+def _plane_idx(n, m, stride):
+    """m evenly spaced lattice indices along an n-point axis, on the stride
+    grid, kept one stride away from the boundary planes (those slice empty)."""
+    coarse = np.arange(stride, int(n) - stride, stride)
+    return coarse[np.linspace(0, coarse.size - 1, m).round().astype(int)]
+
+
+POS = {"x": gx[_plane_idx(nl[0], N_SLICE, SLICE_STRIDE)],
+       "y": gy[_plane_idx(nl[1], N_SLICE, SLICE_STRIDE)],
+       "z": gz[_plane_idx(nl[2], N_SLICE, SLICE_STRIDE)]}
+DEF = {ax: int(np.argmin(np.abs(POS[ax] - t)))
+       for ax, t in (("x", 0.0), ("y", 0.0), ("z", 4.0))}
+
+
+def coarse_image(fields):
+    """pv.ImageData of the common lattice subsampled by SLICE_STRIDE (point data)."""
+    img = pv.ImageData(
+        dimensions=tuple(int((n - 1) // SLICE_STRIDE + 1) for n in nl),
+        origin=(gx[0], gy[0], gz[0]), spacing=(h_min * SLICE_STRIDE,) * 3)
+    for name, f in fields.items():
+        img.point_data[name] = f[::SLICE_STRIDE, ::SLICE_STRIDE,
+                                 ::SLICE_STRIDE].transpose(2, 1, 0).ravel()
+    return img
+
+
+class _ActorOrder:
+    """Bookkeeping of the vtk.js actor order produced by successive add_mesh
+    calls: each mesh adds one actor, an enabled scalar bar one more right
+    after it (verified against the exported scene)."""
+
+    def __init__(self):
+        self.n = 0
+
+    def add(self, pl, mesh, show_bar=False, **kw):
+        i = self.n
+        pl.add_mesh(mesh, show_scalar_bar=show_bar, **kw)
+        self.n += 1 + int(show_bar)
+        return i
+
+
+def _add_slices(pl, ao, imgc, sc, cmap, clim, slices, bars):
+    """N_SLICE slice planes per axis for one scalar; pyvista shares one scalar
+    bar per lookup table, so request it only once, at the default x position."""
+    for ax in AXES:
+        idxs = []
+        for j, p in enumerate(POS[ax]):
+            bar = (j == DEF[ax] and sc not in bars)
+            i = ao.add(pl,
+                       imgc.slice(normal=NRM[ax],
+                                  origin=tuple(p if a == ax else 0.0
+                                             for a in AXES)),
+                       show_bar=bar, name=f"sl_{sc}_{ax}_{j}",
+                       scalars=sc, cmap=cmap, clim=clim)
+            if bar:
+                bars[sc] = i + 1
+            idxs.append(i)
+        slices[sc][ax] = {"pos": [float(v) for v in POS[ax]], "idx": idxs}
+
+
+EXPORT_TAIL = "OfflineLocalView.load(container, { base64Str });"
+
+PANEL_JS = r"""
+window.__rt3d_ui = (function () {
+  const M = __MANIFEST__;
+  function init(tries) {
+    const rw = (window.global && window.global.renderWindow) || window.renderWindow;
+    let ren = null, n = 0;
+    if (rw && typeof rw.getRenderers === "function")
+      rw.getRenderers().forEach(r => {
+        if (r.getActors().length > n) { n = r.getActors().length; ren = r; }
+      });
+    if (!ren) {
+      if (tries-- > 0) setTimeout(() => init(tries), 200);
+      else console.error("rt3d panel: vtk.js scene not found");
+      return;
+    }
+    const A = ren.getActors();
+    if (ren.setBackground) ren.setBackground([0.07, 0.08, 0.11]);
+    const st = { iso: M.iso.def, x: M.def.x, y: M.def.y, z: M.def.z,
+                 sc: M.scalars[0], isoOn: true, allIso: false,
+                 slOn: true, boxOn: true };
+    function apply() {
+      M.iso.idx.forEach((a, j) =>
+        A[a].setVisibility(st.isoOn && (st.allIso || j === st.iso)));
+      M.scalars.forEach(sc => {
+        M.axes.forEach(ax => M.slices[sc][ax].idx.forEach((a, j) =>
+          A[a].setVisibility(st.slOn && sc === st.sc && j === st[ax])));
+        if (M.bars[sc] !== undefined)
+          A[M.bars[sc]].setVisibility(st.slOn && sc === st.sc);
+      });
+      A[M.box].setVisibility(st.boxOn);
+      rw.render();
+    }
+    const p = document.createElement("div");
+    p.style.cssText = "position:fixed;left:12px;top:12px;z-index:999;width:250px;" +
+      "background:rgba(15,17,23,.88);color:#dde3ee;padding:12px 14px;" +
+      "border-radius:10px;font:12px/1.5 system-ui,sans-serif;" +
+      "box-shadow:0 4px 18px rgba(0,0,0,.5);user-select:none";
+    function lab(t) {
+      const d = document.createElement("div");
+      d.textContent = t; p.appendChild(d); return d;
+    }
+    function slider(max, val, text, key) {
+      const l = lab(text(val));
+      const s = document.createElement("input");
+      s.type = "range"; s.min = 0; s.max = max; s.step = 1; s.value = val;
+      s.style.cssText = "width:100%;margin:2px 0 8px";
+      s.addEventListener("input", () => {
+        st[key] = +s.value; l.textContent = text(+s.value); apply();
+      });
+      p.appendChild(s);
+    }
+    function check(txt, key) {
+      const w = document.createElement("label");
+      w.style.cssText = "display:block;margin:2px 0";
+      const c = document.createElement("input");
+      c.type = "checkbox"; c.checked = st[key];
+      c.addEventListener("change", () => { st[key] = c.checked; apply(); });
+      w.appendChild(c); w.appendChild(document.createTextNode(" " + txt));
+      p.appendChild(w);
+    }
+    lab(M.title).style.fontWeight = "600";
+    p.style.marginBottom = "8px";
+    if (M.iso.idx.length)
+      slider(M.iso.idx.length - 1, st.iso,
+             j => M.iso.label + " = " + (+M.iso.levels[j]).toFixed(M.iso.dec) +
+                  (M.iso.unit ? " " + M.iso.unit : ""), "iso");
+    M.axes.forEach(ax =>
+      slider(M.slices[M.scalars[0]][ax].pos.length - 1, st[ax],
+             j => ax + " = " + (+M.slices[M.scalars[0]][ax].pos[j]).toFixed(2) +
+                  " m", ax));
+    if (M.scalars.length > 1) {
+      const w = document.createElement("div");
+      w.style.cssText = "margin:4px 0";
+      M.scalars.forEach(sc => {
+        const r = document.createElement("label");
+        r.style.cssText = "margin-right:10px";
+        const i = document.createElement("input");
+        i.type = "radio"; i.name = "rt3d-sc"; i.checked = sc === st.sc;
+        i.addEventListener("change", () => { st.sc = sc; apply(); });
+        r.appendChild(i); r.appendChild(document.createTextNode(" " + sc));
+        w.appendChild(r);
+      });
+      p.appendChild(w);
+    }
+    check("slice planes", "slOn");
+    check("isosurfaces", "isoOn");
+    check("all iso levels", "allIso");
+    check("domain box", "boxOn");
+    lab("drag: orbit \u00b7 wheel: zoom").style.cssText =
+      "margin-top:8px;opacity:.6";
+    document.body.appendChild(p);
+    apply();
+  }
+  init(150);
+})();
+"""
+
+
+def _finish(pl, ao, path, manifest, title):
+    # self-consistency: every manifest actor index must exist in the scene
+    for grp in manifest["slices"].values():
+        for ax in grp.values():
+            assert max(ax["idx"]) < ao.n, f"slice idx out of range in {path}"
+    assert max(manifest["iso"]["idx"], default=-1) < ao.n
+    assert manifest["box"] == ao.n - 1
+    pl.reset_camera()
+    pl.camera.azimuth, pl.camera.elevation = 40, 18
+    pl.camera.zoom(0.92)
+    pl.trame.export_html(path)
+    pl.close()
+    # inject the slider control panel into the exported static scene
+    manifest["title"] = title
+    with open(path, encoding="utf-8") as fh:
+        html = fh.read()
+    if EXPORT_TAIL not in html:
+        raise RuntimeError(f"unexpected trame export tail in {path}")
+    js = PANEL_JS.replace("__MANIFEST__", json.dumps(manifest))
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(html.replace(EXPORT_TAIL, EXPORT_TAIL + "\n" + js))
 
 
 def scene_run(key):
     img = lattice_image(key)
+    imgc = coarse_image({sc: lat[key][sc] for sc in ("J", "var")})
+    ao = _ActorOrder()
     pl = pv.Plotter(off_screen=True, window_size=(900, 700))
-    for lev, col in zip(ISO_LEVELS, ISO_COLS):
-        pl.add_mesh(img.contour(isosurfaces=[lev], scalars="kappa_e"),
-                    name=f"kappa_e = {lev:g}", color=col, opacity=0.3,
-                    specular=0.5, specular_power=25)
+
+    ke_max = float(lat[key]["kappa_e"].max())
+    iso_levels = [float(v) for v in ke_max * np.linspace(0.12, 0.92, N_ISO)]
+    iso_cmap = matplotlib.colormaps["Blues"]
+    iso_idx = [ao.add(pl, img.contour(isosurfaces=[lev], scalars="kappa_e"),
+                      name=f"iso_{j}",
+                      color=iso_cmap(0.35 + 0.6 * j / (N_ISO - 1)),
+                      opacity=0.32, specular=0.6, specular_power=30)
+               for j, lev in enumerate(iso_levels)]
+    slices, bars = {sc: {} for sc in ("J", "var")}, {}
     for sc, cm in (("J", "viridis"), ("var", "inferno")):
-        for nrm, org, tag in SLICES:
-            pl.add_mesh(img.slice(normal=nrm, origin=org), name=f"{sc} @ {tag}",
-                        scalars=sc, cmap=cm, show_scalar_bar=(tag == "y = 0"))
-    pl.add_mesh(pv.Box(bounds=(box.x0, box.x1, box.y0, box.y1, box.z0, box.z1)),
-                name="domain", style="wireframe", color="black", line_width=1.0)
-    pl.reset_camera()
-    pl.camera.azimuth, pl.camera.elevation = 40, 18
-    pl.camera.zoom(0.92)
-    pl.trame.export_html(os.path.join(OUT, f"scene_{key}.html"))
-    pl.close()
+        _add_slices(pl, ao, imgc, sc, cm,
+                    (0.0, float(lat[key][sc].max())), slices, bars)
+    box_i = ao.add(pl, pv.Box(bounds=(box.x0, box.x1, box.y0, box.y1,
+                                      box.z0, box.z1)),
+                   name="domain", style="wireframe", color="white",
+                   line_width=1.0)
+    _finish(pl, ao, os.path.join(OUT, f"scene_{key}.html"),
+            {"scalars": ["J", "var"], "axes": list(AXES),
+             "iso": {"label": "kappa_e", "unit": "m^-1", "dec": 2,
+                     "levels": iso_levels, "idx": iso_idx, "def": N_ISO // 2},
+             "slices": slices, "bars": bars, "box": box_i, "def": DEF},
+            RUN_TITLES[key])
 
 
 def scene_diff(a, b, tag):
@@ -713,21 +913,29 @@ def scene_diff(a, b, tag):
                        origin=(gx[0], gy[0], gz[0]), spacing=(h_min,) * 3)
     img.point_data["dJ"] = d.transpose(2, 1, 0).ravel()
     pos = d[d > 0]
-    levels = np.unique(np.quantile(pos, [0.80, 0.90, 0.99])) if pos.size else []
+    iso_levels = ([float(v) for v in
+                   np.unique(np.quantile(pos, np.linspace(0.5, 0.995, N_ISO)))]
+                  if pos.size else [])
+    ao = _ActorOrder()
     pl = pv.Plotter(off_screen=True, window_size=(900, 700))
-    for lev in levels:
-        pl.add_mesh(img.contour(isosurfaces=[lev], scalars="dJ"),
-                    name=f"|dJ| = {lev:.3f}", cmap="magma", opacity=0.4)
-    for nrm, org, t in SLICES:
-        pl.add_mesh(img.slice(normal=nrm, origin=org), name=f"|dJ| @ {t}",
-                    scalars="dJ", cmap="magma", show_scalar_bar=(t == "y = 0"))
-    pl.add_mesh(pv.Box(bounds=(box.x0, box.x1, box.y0, box.y1, box.z0, box.z1)),
-                name="domain", style="wireframe", color="black", line_width=1.0)
-    pl.reset_camera()
-    pl.camera.azimuth, pl.camera.elevation = 40, 18
-    pl.camera.zoom(0.92)
-    pl.trame.export_html(os.path.join(OUT, f"scene_diff_{tag}.html"))
-    pl.close()
+    iso_idx = [ao.add(pl, img.contour(isosurfaces=[lev], scalars="dJ"),
+                      name=f"iso_{j}", cmap="magma", opacity=0.4,
+                      specular=0.4, specular_power=20)
+               for j, lev in enumerate(iso_levels)]
+    slices, bars = {"dJ": {}}, {}
+    _add_slices(pl, ao, coarse_image({"dJ": d}), "dJ", "magma",
+                (0.0, float(d.max())), slices, bars)
+    box_i = ao.add(pl, pv.Box(bounds=(box.x0, box.x1, box.y0, box.y1,
+                                      box.z0, box.z1)),
+                   name="domain", style="wireframe", color="white",
+                   line_width=1.0)
+    _finish(pl, ao, os.path.join(OUT, f"scene_diff_{tag}.html"),
+            {"scalars": ["dJ"], "axes": list(AXES),
+             "iso": {"label": "|dJ|", "unit": "", "dec": 3,
+                     "levels": iso_levels, "idx": iso_idx,
+                     "def": len(iso_levels) // 2},
+             "slices": slices, "bars": bars, "box": box_i, "def": DEF},
+            f"|J({b}) - J({a})|")
 
 
 if pv is not None:
