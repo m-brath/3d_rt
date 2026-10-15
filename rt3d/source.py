@@ -106,6 +106,37 @@ def delta_extinction(kappa_e, kappa_s, g, M):
     return np.asarray(kappa_e, dtype=float) - np.asarray(kappa_s, dtype=float) * g**M
 
 
+def _bucket_structure(cache, g_cells, g_decimals):
+    """
+    Bucket cells by g rounded to g_decimals into bucket-contiguous blocks
+    (plan/optimization-plan.md P6).  Cached in Phi_cache: the per-iteration
+    np.unique + boolean-mask scans and the per-bucket fancy-index gathers
+    dominated the source cost; after the first call only the slice matmuls
+    remain.  Stable sort keeps the original cell order inside a bucket, so
+    results are bit-comparable to the naive bucket loop.
+
+    Returns (gv_unique, blocks, order, inverse): blocks are (start, stop)
+    into the sorted arrays; sorted = cells[order].
+    """
+    key = ("_buckets", int(g_decimals))
+    got = cache.get(key)
+    if got is not None:
+        return got
+    gv = np.round(np.asarray(g_cells, dtype=float), g_decimals)
+    order = np.argsort(gv, kind="stable")
+    gvs = gv[order]
+    change = np.flatnonzero(gvs[1:] != gvs[:-1]) + 1
+    bounds = np.concatenate(([0], change, [gvs.size]))
+    gv_u = [float(gvs[bounds[i]]) for i in range(bounds.size - 1)]
+    blocks = [(int(bounds[i]), int(bounds[i + 1]))
+              for i in range(bounds.size - 1)]
+    inv = np.empty(order.size, dtype=np.intp)
+    inv[order] = np.arange(order.size)
+    got = (gv_u, blocks, order, inv)
+    cache[key] = got
+    return got
+
+
 def scattering_source(I, dg, omega, B, Phi_w=None, g=0.0, beam_scat=None,
                       g_cells=None, g_decimals=2, Phi_cache=None, delta_M=0):
     """
@@ -181,17 +212,26 @@ def scattering_source(I, dg, omega, B, Phi_w=None, g=0.0, beam_scat=None,
             S = (1.0 - omega)[:, None] * B[:, None] + omega[:, None] * (I @ Phi_w.T)
         else:
             cache = {} if Phi_cache is None else Phi_cache
-            gv = np.round(np.asarray(g_cells, dtype=float), g_decimals)
+            gv_u_list, rows_list, order, inv = _bucket_structure(
+                cache, g_cells, g_decimals
+            )
             S = np.broadcast_to(
                 (1.0 - omega)[:, None] * B[:, None], (omega.size, dg.n_dir)
             ).copy()
-            for gv_u in np.unique(gv):
+            # bucket-contiguous blocks: one gather, per-bucket contiguous
+            # slice matmuls, one scatter (the per-iteration boolean masks
+            # and fancy-index gathers of the naive bucket loop dominated)
+            S_b = S[order]
+            om_b = omega[order]
+            I_b = I[order]
+            for gv_u, rows in zip(gv_u_list, rows_list):
                 Phi_u = cache.get(gv_u)
                 if Phi_u is None:
-                    Phi_u = dg.hg_matrix(float(gv_u))
+                    Phi_u = dg.hg_matrix(gv_u)
                     cache[gv_u] = Phi_u
-                rows = gv == gv_u
-                S[rows] += omega[rows, None] * (I[rows] @ Phi_u.T)
+                a, b = rows
+                S_b[a:b] += om_b[a:b, None] * (I_b[a:b] @ Phi_u.T)
+            S = S_b[inv]
     elif delta_M < 1 or int(delta_M) != delta_M:
         raise ValueError(f"delta_M must be a non-negative integer, got {delta_M}")
     elif g_cells is None:
@@ -211,24 +251,29 @@ def scattering_source(I, dg, omega, B, Phi_w=None, g=0.0, beam_scat=None,
              + omega[:, None] * scat - omega[:, None] * gM * I) / denom[:, None]
     else:
         cache = {} if Phi_cache is None else Phi_cache
-        gv = np.round(np.asarray(g_cells, dtype=float), g_decimals)
-        S = np.zeros((omega.size, dg.n_dir))
-        for gv_u in np.unique(gv):
+        gv_u_list, rows_list, order, inv = _bucket_structure(
+            cache, g_cells, g_decimals
+        )
+        S_b = np.empty((omega.size, dg.n_dir))
+        om_b = omega[order]
+        B_b = B[order]
+        I_b = I[order]
+        for gv_u, (a, b) in zip(gv_u_list, rows_list):
             key = (float(gv_u), int(delta_M))
             split = cache.get(key)
             if split is None:
-                split = dg.hg_delta_matrices(float(gv_u), delta_M)
+                split = dg.hg_delta_matrices(gv_u, delta_M)
                 cache[key] = split
             Phi_w_delta, moments = split
-            gM = float(gv_u) ** delta_M
-            rows = gv == gv_u
-            scat = I[rows] @ Phi_w_delta.T
+            gM = gv_u ** delta_M
+            scat = I_b[a:b] @ Phi_w_delta.T
             for Pn_w in moments:
-                scat += I[rows] @ Pn_w.T
-            denom = 1.0 - omega[rows] * gM
-            S[rows] = ((1.0 - omega[rows])[:, None] * B[rows, None]
-                       + omega[rows, None] * scat
-                       - omega[rows, None] * gM * I[rows]) / denom[:, None]
+                scat += I_b[a:b] @ Pn_w.T
+            denom = 1.0 - om_b[a:b] * gM
+            S_b[a:b] = ((1.0 - om_b[a:b])[:, None] * B_b[a:b, None]
+                        + om_b[a:b, None] * scat
+                        - om_b[a:b, None] * gM * I_b[a:b]) / denom[:, None]
+        S = S_b[inv]
     if beam_scat is not None:
         S = S + beam_scat
     return S

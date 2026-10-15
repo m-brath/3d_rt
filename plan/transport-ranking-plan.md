@@ -15,7 +15,8 @@ solution that is demonstrably closer to the continuum limit.
 
 ## 2. New runs (4 + 1 reference)
 
-Same case, same 42 ordinates, same Ng/tol settings as the six base runs.
+Same case, same 42 ordinates, same Ng/tol settings as the six base runs
+(except the two reference-grid runs — see the addendum at the end).
 
 | key | grid | transport | delta-M | role |
 |---|---|---|---|---|
@@ -80,3 +81,22 @@ cells are sampled pointwise, not averaged).
 - octree d3 vs d4 error vs reference < octree d3 pairwise gap pattern;
 - chain/sc 48³ errors ≈ half the 24³ errors (first-order h);
 - TOA mean F_z of refinement runs moves monotonically toward the reference.
+
+## 7. Addendum (2026-10-15) — 642 ordinates for the two reference-grid runs
+
+The two runs on the fine reference octree (`octree_ref_dM0`, `octree_ref_dM1`)
+are re-run with icosahedral refinement 3 = **642 ordinates** instead of 42, so
+the reference is finer in *angle* as well as in space. Consequences:
+
+- the ranking errors of all 42-ordinate runs now *include* their angular
+  (ordinate-resolution) error — the previous "the 42-ordinate angular error
+  cancels in every comparison" no longer holds against the reference;
+- comparisons *among* the 42-ordinate runs (the six base pairs, the unigrid
+  refinement pairs) are unchanged;
+- the δ-M equivalence check `octree_ref_dM1` vs `octree_ref_dM0` stays valid
+  (both at 642 ordinates);
+- the octree convergence sequence d3 → d4 → ref is no longer purely spatial
+  (the last step changes grid *and* angle);
+- cost: the reference runs' sweeps scale ~linearly in N_dir (15.3× per
+  iteration) and the octree march precomputation stores ~34 MB per ordinate
+  on the 50 380-leaf grid (~22 GB for 642 ordinates) — needs a ≥32 GB machine.

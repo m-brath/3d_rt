@@ -282,6 +282,16 @@ own resolution of the piecewise-constant field. On the unigrid the
 lattice-stencil chain is kept (its error is the documented anchor-5 effect,
 §14).
 
+> **Performance note** (plan/optimization-plan.md): with `numba` installed
+> (auto-detected, `rt3d.jit`), the octree path *fuses* the DDA march with the
+> formal solution — tau and source contributions are accumulated per ray in
+> compiled parallel code and the segment arrays are never materialised
+> (measured on a 489k-leaf octree: precompute 443 s → 5.5 s for 42 ordinates,
+> 18 GB segment memory → ~0). The NumPy segment march above remains the
+> reference implementation (`jit=False`), and all compiled kernels are
+> bit-comparable to it (marches, unigrid chain/SC sweeps) or agree to
+> transcendental rounding (fused octree sweep) — `tests/test_jit.py`.
+
 ## 6. Short-characteristics transport
 
 > Detailed derivation, flowcharts and schematic figures for both grids:
@@ -338,7 +348,11 @@ $\tau_{\mathrm{seg}} = \kappa_e[\mathrm{leaf}]\cdot \ell$, block-wise
 cumulative sums via `_block_prefixes` (a single `np.cumsum` plus per-block
 offset correction — the "cumsum vectorization"), and `np.add.at` accumulation
 onto leaf centers. The march depends only on grid + direction, so it is built
-once per ordinate and reused by every iteration.
+once per ordinate and reused by every iteration. With numba available (the
+default, `jit=None`) the march and this recursion are instead **fused per ray
+in compiled parallel code** (`rt3d.jit`): no segment arrays are materialised
+and each sweep re-marches — cheaper overall than storing and re-reading tens
+of millions of segments per ordinate.
 
 `transport.sweep_all` / `sweep_all_octree_exact` loop over all ordinates;
 the source $S$ may be direction-dependent (`(n_cells, N_dir)`), which is what
@@ -701,9 +715,13 @@ One section per `rt3d` module, with the real signatures.
   sub-segments of the center-to-center path on the lattice.
 - `build_chain(grid, omega, periodic_box=None, max_offset=None) -> chain` —
   unigrid chain dict: `s`, `vhat`, `parent`, `roots`, `waves`,
-  `sub_cells (M, n_cells)`, `sub_len`, `root_steps` (step-major backward
-  march segments from root centers to entry), `root_exit_t`,
-  `root_exit_axis`, `root_exit_side`. Used by the solver on the unigrid.
+  `rel (M,3) int16` + `sub_delta (M,) int64` + `periodic` (the sub-segment
+  cells of a non-root cell are `cell + rel[m]`, flat index `wave +
+  sub_delta[m]`; replaced the old `(M, n_cells)` int64 table, which cost
+  ~1.5 GB at 100³), `sub_len`, `root_steps` = `(ridx, cell, length)` arrays
+  (step-major backward march segments from root centers to entry),
+  `root_exit_t`, `root_exit_axis`, `root_exit_side`. Used by the solver on
+  the unigrid.
 - `build_chain_octree(oct, omega, periodic_box=None, cos_min=0.9,
   max_hops=8) -> chain` — **reference only, not used by the solver** (§5):
   best-aligned center-to-center connection with cycle peeling; kept for
@@ -724,25 +742,55 @@ One section per `rt3d` module, with the real signatures.
   the ground face.
 - `sweep_direction(grid, chain, kappa_e, S, bc, bottom_I=None) -> I (n_cells,)`
   — one unigrid ordinate sweep (recursion of §6).
-- `sweep_all(grid, direction_grid, kappa_e, S, bc, periodic_box=None, chains=None)
-  -> (I (n_cells,N_dir), chains)` — all ordinates; pass prebuilt `chains` to
-  reuse across iterations.
+- `sweep_all(grid, direction_grid, kappa_e, S, bc, periodic_box=None,
+  chains=None, n_jobs=1) -> (I (n_cells,N_dir), chains)` — all ordinates;
+  pass prebuilt `chains` to reuse across iterations. With numba available
+  each ordinate sweeps via the compiled `rt3d.jit.chain_sweep_jit` kernel
+  (bit-identical to `sweep_direction`); `n_jobs > 1` runs the kernels on a
+  thread pool (njit releases the GIL).
 - `beam_optical_depth(grid, omega_sun, kappa_e, periodic_box=None) -> tau_b`
   — exact backward-beam $\tau$ at cell centers (unigrid); raises unless
   $\Omega_{\mathrm{sun},z} < 0$.
-- `precompute_octree_march(oct, omega, periodic_box=None) -> march` —
-  exact backward march per leaf center for one ordinate (§6); dict `leaf`,
-  `length`, `offsets`, `ray_of`, `omega`, `entry_cell` (bottom-face leaf of
-  each upward ray's ground entry point, for the ground BC).
+- `precompute_octree_march(oct, omega, periodic_box=None, jit=None) -> march`
+  — exact backward march per leaf center for one ordinate (§6). `jit=None`
+  (default) uses the fused numba path when available: dict `fused=True`,
+  `omega`, `budget`, `entry_cell`, `periodic_box` — no segment arrays, the
+  sweep re-marches in compiled code. `jit=False` gives the reference
+  segment dict: `leaf`, `length`, `offsets`, `ray_of`, `omega`,
+  `entry_cell` (bottom-face leaf of each upward ray's ground entry point,
+  for the ground BC).
 - `sweep_direction_octree_exact(oct, march, kappa_e, S, bc, bottom_I=None) -> I`
-  — one octree ordinate sweep along exact characteristics.
+  — one octree ordinate sweep along exact characteristics (fused numba
+  march+sweep when `march["fused"]`).
 - `sweep_all_octree_exact(oct, direction_grid, kappa_e, S, bc,
-  periodic_box=None, marches=None) -> (I, marches)` — all ordinates.
-  **This is the octree transport used by the solver.**
+  periodic_box=None, marches=None, n_jobs=1) -> (I, marches)` — all
+  ordinates. **This is the octree transport used by the solver.**
 - `sweep_direction_octree(oct, chain, kappa_e, S, bc)` and
   `sweep_all_octree(...)` — sweeps along `build_chain_octree` chains
   (reference only).
-- `beam_optical_depth_octree(oct, omega_sun, kappa_e, periodic_box=None) -> tau_b`.
+- `beam_optical_depth_octree(oct, omega_sun, kappa_e, periodic_box=None,
+  jit=None) -> tau_b`.
+
+### `rt3d.jit` — numba fast paths (plan/optimization-plan.md)
+
+All kernels reproduce their NumPy reference operation-for-operation and
+degrade to it when numba is missing (`rt3d.jit.HAVE_NUMBA`); parity is
+locked by `tests/test_jit.py`.
+
+- `march_octree_jit(origin, direction, oct, path_len, periodic_box=None,
+  merge=False)` — per-ray compiled DDA, ray-major segments, bit-comparable
+  to `octree.march_octree`.
+- `sweep_direction_octree_exact_jit(oct, omega, budget, kappa_e, S, I_in,
+  periodic_box=None)` — fused march + formal solution, parallel over rays,
+  no segment arrays.
+- `beam_optical_depth_octree_jit(...)`, `locate_jit(points, oct)` — fused
+  beam tau; parallel point location (also used by `balance_21`).
+- `chain_sweep_jit(grid, chain, kappa_e, S_d, bc, bottom_I=None)`,
+  `sc_sweep_jit(grid, sc, kappa_e, S_d, bc, ...)` — compiled unigrid
+  sweeps, bit-identical to `sweep_direction` / `sweep_direction_sc`;
+  used automatically by the solver and the `sweep_all*` functions.
+- `octree_grid.march_arrays()` — cached plain-array node tables + scalar
+  parameters consumed by the kernels.
 
 ### `rt3d.source` — source function assembly
 
@@ -777,11 +825,14 @@ One section per `rt3d` module, with the real signatures.
 
 - `lambda_iteration(grid, dg, kappa_e, kappa_s, B, bc, g=0.0,
   periodic_box=None, beam=None, n_iter=100, tol=1e-8, ng=None,
-  delta_M=0) -> result`
+  delta_M=0, transport="chain", jit=None, n_jobs=1) -> result`
   — the entry point. `grid` is a `unigrid` or `octree_grid`; $g$ scalar or
   `(n_cells,)`; `beam = {"omega_sun": (3,) unit, "F0": float}` or `None`;
   `ng` is `None`/`False` (plain LI), `True` (build `ng1d(grid)`) or a
-  prepared `ng1d`; `delta_M = 0` off, `>= 1` delta-M scaling (§8).
+  prepared `ng1d`; `delta_M = 0` off, `>= 1` delta-M scaling (§8);
+  `jit=None` auto-selects the fused numba octree march (§5 performance
+  note); `n_jobs > 1` sweeps ordinates in parallel threads
+  (plan/optimization-plan.md P3).
   Returns the result dict:
 
   | key | shape / type | meaning |
@@ -796,6 +847,9 @@ One section per `rt3d` module, with the real signatures.
   | `converged` | bool | `history[-1] < tol` |
   | `delta_M` | int | delta-M order used (0 = off) |
   | `kappa_e_delta` | `(n_cells,)` | extinction used for the diffuse sweeps; equals `kappa_e` when `delta_M = 0` (§8) |
+  | `transport` | str | unigrid transport used (`"chain"` or `"sc"`) |
+  | `jit` | bool | fused numba octree march/sweep used (octree only) |
+  | `n_jobs` | int | thread count used for the per-ordinate sweeps |
 
   Note there is **no `SolverConfig`** class (that name exists only in
   `plan/plan.md`); all configuration is via the keyword arguments above.
@@ -1353,7 +1407,8 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 | `.balance_21(max_depth=6)` | 2:1 face balance via 3×3 face probing |
 | `.finalize()` / `.sample_fields(...)` | freeze leaf arrays / sample callable fields at leaf centers |
 | `.locate(points)` / `.split(nodes)` / `.leaves_all()` | vectorized descent point location / node ops |
-| `march_octree(origin, direction, oct, path_len, periodic_box=None)` | vectorized DDA march through the octree |
+| `.march_arrays()` | cached plain-array node tables for the numba kernels (`rt3d.jit`) |
+| `march_octree(origin, direction, oct, path_len, periodic_box=None)` | vectorized DDA march through the octree (reference) |
 | `node_major_segments(seg_ray, seg_leaf, seg_len, n_nodes)` | regroup segments into node-major blocks |
 
 ### `rt3d.characteristics`
@@ -1375,14 +1430,26 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 | `downward_irradiance(I, dg)` | $\sum_{\Omega_z<0} w\|\Omega_z\| I$ at ground level |
 | `ground_inflow(F_down, ground, beam_irr=0.0)` | Lambertian ground radiance |
 | `beam_irradiance_ground(grid, omega_sun, kappa_e, tau_b, F0, periodic_box=None)` | direct-beam irradiance at the ground face |
-| `sweep_direction(grid, chain, kappa_e, S, bc, bottom_I=None)` | one unigrid ordinate sweep |
-| `sweep_all(grid, direction_grid, kappa_e, S, bc, periodic_box=None, chains=None)` | all-ordinate unigrid transport |
-| `precompute_octree_march(oct, omega, periodic_box=None)` | exact backward march per leaf center, one ordinate |
+| `sweep_direction(grid, chain, kappa_e, S, bc, bottom_I=None)` | one unigrid ordinate sweep (reference) |
+| `sweep_all(grid, direction_grid, kappa_e, S, bc, periodic_box=None, chains=None, n_jobs=1)` | all-ordinate unigrid transport (numba kernels when available) |
+| `precompute_octree_march(oct, omega, periodic_box=None, jit=None)` | exact backward march per leaf center, one ordinate (default: fused numba mode, no segment arrays) |
 | `sweep_direction_octree_exact(oct, march, kappa_e, S, bc, bottom_I=None)` | one octree ordinate sweep, exact characteristics |
-| `sweep_all_octree_exact(oct, direction_grid, kappa_e, S, bc, periodic_box=None, marches=None)` | all-ordinate octree transport (solver path) |
+| `sweep_all_octree_exact(oct, direction_grid, kappa_e, S, bc, periodic_box=None, marches=None, n_jobs=1)` | all-ordinate octree transport (solver path) |
 | `sweep_direction_octree(oct, chain, kappa_e, S, bc)` / `sweep_all_octree(...)` | chain-based octree sweeps (reference only) |
 | `beam_optical_depth(grid, omega_sun, kappa_e, periodic_box=None)` | beam $\tau$ at unigrid cell centers |
-| `beam_optical_depth_octree(oct, omega_sun, kappa_e, periodic_box=None)` | beam $\tau$ at octree leaf centers |
+| `beam_optical_depth_octree(oct, omega_sun, kappa_e, periodic_box=None, jit=None)` | beam $\tau$ at octree leaf centers |
+
+### `rt3d.jit` (numba fast paths)
+
+| signature | description |
+|---|---|
+| `HAVE_NUMBA` | numba availability flag; all entry points fall back to NumPy references |
+| `march_octree_jit(origin, direction, oct, path_len, periodic_box=None, merge=False)` | compiled per-ray DDA (bit-comparable segments) |
+| `sweep_direction_octree_exact_jit(oct, omega, budget, kappa_e, S, I_in, periodic_box=None)` | fused octree march + formal solution, parallel over rays |
+| `beam_optical_depth_octree_jit(oct, omega_sun, kappa_e, budget, periodic_box=None)` | fused beam-$\tau$ march |
+| `locate_jit(points, oct)` | parallel point location |
+| `chain_sweep_jit(grid, chain, kappa_e, S_d, bc, bottom_I=None)` | compiled unigrid chain sweep (bit-identical) |
+| `sc_sweep_jit(grid, sc, kappa_e, S_d, bc, bottom_I=None, wrap_tol=1e-12, max_passes=None)` | compiled SC sweep (bit-identical) |
 
 ### `rt3d.source`
 

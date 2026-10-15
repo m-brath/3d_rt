@@ -4,25 +4,33 @@ Comparison of the three transport configurations of the `rt3d` solver on the
 MANUAL §11 worked example, each run with and without delta-M (Wiscombe)
 scaling, **plus a fine-octree reference solution and grid-refinement runs
 that rank every configuration by accuracy** (plan:
-`plan/compare-transport-plan.md` + `plan/transport-ranking-plan.md`); all
-figures and CSVs live in `plot/compare_transport/`. Measured 2026-10-14 on
-Windows with the `pyarts` interpreter; physics numbers are
+`plan/compare-transport-plan.md` + `plan/transport-ranking-plan.md`, incl.
+its addendum §7); all figures and CSVs live in `plot/compare_transport/`.
+The two runs on the fine reference octree use **642 ordinates** (icosahedral
+refinement 3) instead of the 42-ordinate development grid, so the reference
+is finer in *angle* as well as in space and the ranking errors of the
+42-ordinate runs include their angular error (comparisons *among* the
+42-ordinate runs still cancel it). Measured 2026-10-15 on macOS/arm64
+(Apple M4 Pro, 64 GB) with the `pyarts` interpreter; physics numbers are
 machine-independent, wall times are not (the previous version of this report
-was measured on macOS/arm64 — wall times differ by ~2–4× between the two
+was measured on Windows — wall times differ by ~2–4× between the two
 machines; Ng-accelerated iteration counts can also shift by a few iterations
-with BLAS rounding, e.g. SC δ-off: 51 → 44).
+with BLAS rounding, e.g. SC δ-off: 44 → 51). The wall times here predate the
+numba fast paths of `rt3d/jit.py` (landed after this run started); reruns
+with them will be faster.
 
 Reproduce with:
 
-```powershell
-$env:Path = "$env:USERPROFILE\miniforge3\envs\pyarts\Library\bin;" + $env:Path
-& "$env:USERPROFILE\miniforge3\envs\pyarts\python.exe" scripts/compare_transport.py
+```sh
+~/miniforge3/envs/pyarts/bin/python scripts/compare_transport.py
 ```
 
-(3D HTML scenes need `trame-pyvista`; installed in the Windows `pyarts` env
-on 2026-10-14, so all scenes and `vol_j.png` are current. Per-run solutions
-are cached in `plot/compare_transport/_solve_cache/` (gitignored) — reruns
-skip the solves.)
+(The 642-ordinate reference runs need ~22 GB RAM for their octree march
+tables — ~34 MB per ordinate on the 50 380-leaf grid. 3D HTML scenes need
+`trame-pyvista`; installed in the macOS `pyarts` env on 2026-10-13, so all
+scenes and `vol_j.png` are current. Per-run solutions are cached in
+`plot/compare_transport/_solve_cache/` (gitignored) — reruns skip the solves;
+the cache records the ordinate count and stale entries are re-solved.)
 
 ---
 
@@ -44,21 +52,23 @@ solar beam, reflecting ground):
    the exact solution), so the study adds a fine reference solution and
    ranks every run by its error against it (section 5).
 
-Six comparison runs plus five ranking runs:
+Six comparison runs plus five ranking runs (N_dir column: icosahedral
+refinement 1 = 42 ordinates for all runs except the two on the fine
+reference octree, which use refinement 3 = 642 ordinates):
 
-| run key | grid | transport | delta-M | role |
-|---|---|---|---|---|
-| `uni_chain_dM0` | unigrid 24³ | lattice-stencil chains | off | comparison |
-| `uni_chain_dM1` | unigrid 24³ | lattice-stencil chains | M = 1 | comparison |
-| `uni_sc_dM0`    | unigrid 24³ | single-cell short characteristics | off | comparison |
-| `uni_sc_dM1`    | unigrid 24³ | single-cell short characteristics | M = 1 | comparison |
-| `octree_dM0`    | octree (25 264 leaves) | exact characteristic marches | off | comparison |
-| `octree_dM1`    | octree (25 264 leaves) | exact characteristic marches | M = 1 | comparison |
-| `uni_chain48_dM1` | unigrid 48³ (h = 0.208 m) | chains | M = 1 | chain refinement |
-| `uni_sc48_dM1`    | unigrid 48³ | short characteristics | M = 1 | SC refinement |
-| `octree_d4_dM1`   | octree τ_max = 1.0, depth 4 (34 476 leaves) | exact marches | M = 1 | octree refinement |
-| `octree_ref_dM1`  | octree τ_max = 0.5, depth 5 (50 380 leaves) | exact marches | M = 1 | fine-grid δ-M check |
-| `octree_ref_dM0`  | same octree as `octree_ref_dM1` | exact marches | off | **the reference** |
+| run key | grid | transport | delta-M | N_dir | role |
+|---|---|---|---|---|---|
+| `uni_chain_dM0` | unigrid 24³ | lattice-stencil chains | off | 42 | comparison |
+| `uni_chain_dM1` | unigrid 24³ | lattice-stencil chains | M = 1 | 42 | comparison |
+| `uni_sc_dM0`    | unigrid 24³ | single-cell short characteristics | off | 42 | comparison |
+| `uni_sc_dM1`    | unigrid 24³ | single-cell short characteristics | M = 1 | 42 | comparison |
+| `octree_dM0`    | octree (25 264 leaves) | exact characteristic marches | off | 42 | comparison |
+| `octree_dM1`    | octree (25 264 leaves) | exact characteristic marches | M = 1 | 42 | comparison |
+| `uni_chain48_dM1` | unigrid 48³ (h = 0.208 m) | chains | M = 1 | 42 | chain refinement |
+| `uni_sc48_dM1`    | unigrid 48³ | short characteristics | M = 1 | 42 | SC refinement |
+| `octree_d4_dM1`   | octree τ_max = 1.0, depth 4 (34 476 leaves) | exact marches | M = 1 | 42 | octree refinement |
+| `octree_ref_dM1`  | octree τ_max = 0.5, depth 5 (50 380 leaves) | exact marches | M = 1 | **642** | fine-grid δ-M check |
+| `octree_ref_dM0`  | same octree as `octree_ref_dM1` | exact marches | off | **642** | **the reference** |
 
 ---
 
@@ -84,16 +94,20 @@ normalised to the incident beam flux F₀ = 1.
 - **Boundary conditions**: isotropic background I = 1 on the top face;
   Lambertian ground, albedo 0.3, emissivity 0 (no thermal emission).
 
-### 2.2 Direction grid and iteration scheme (identical in all runs)
+### 2.2 Direction grids and iteration scheme
 
-- Icosahedral direction grid, refinement 1 → **42 ordinates** (development
-  grid), solid-angle weights from spherical-triangle areas,
-  Σw = 4π (−1.8e−15).
+- Icosahedral direction grids, solid-angle weights from spherical-triangle
+  areas: refinement 1 → **42 ordinates** (development grid, all comparison
+  and refinement runs, Σw − 4π = −7.1e−15) and refinement 3 → **642
+  ordinates** for the two runs on the fine reference octree
+  (Σw − 4π = +7.1e−15).
 - Lambda iteration with **1D Ng acceleration**, convergence on the relative
   source change, tol = 1e−6, cap 60 iterations.
-- The 42-ordinate *angular* error is identical in every run (including the
-  reference) and therefore cancels in all comparisons; quantifying it is
-  the phase-6 direction-convergence study.
+- The 42-ordinate *angular* error cancels in all comparisons *among* the
+  42-ordinate runs (the six base pairs, the unigrid refinement pairs), but
+  **not** against the 642-ordinate reference: the ranking errors of the
+  42-ordinate runs include their angular error, and the reference's own
+  angular error is ~15× better resolved (section 5.2).
 
 ### 2.3 Grids
 
@@ -151,11 +165,14 @@ this.
 ### 2.6 The reference solution
 
 `octree_ref_dM0`: the depth-5 octree (h_min = 0.078 m ≈ 3.3 cells per mean
-free path in the cloud core), exact marches, **delta-M off** so it carries
-no O(τ_cell) quadrature gap of the explicit −ω g^M I term. It is the finest
-discretization available on this case; its own remaining error is bounded
-by the depth-3 → depth-4 → depth-5 convergence sequence (section 5.2,
-error roughly halving per level) and by the fine-grid δ-on↔δ-off check
+free path in the cloud core) at **642 ordinates**, exact marches, **delta-M
+off** so it carries no O(τ_cell) quadrature gap of the explicit −ω g^M I
+term. It is the finest space-angle discretization available on this case;
+its own remaining error is bounded by the depth-3 → depth-4 → depth-5
+*space* convergence sequence and by the 42 → 642 *angle* step (section 5.2:
+the 42-ordinate reference scalars differ from the 642-ordinate ones by
+~1.6% in ⟨J⟩ and ~1% in the TOA flux — the reference's remaining angular
+error is correspondingly smaller), and by the fine-grid δ-on↔δ-off check
 (0.19% max, section 4.1).
 
 ---
@@ -173,7 +190,9 @@ averaged — so every pair of runs is directly pointwise comparable.
   measures the angular anisotropy of the radiation field.
 - **Upward radiance at TOA**: the upward flux map
   F⁺(x, y) = ∫_{μ>0} I μ dΩ at the top layer, and the domain-mean upward
-  radiance per upward ordinate (21 of the 42 ordinates have μ > 0).
+  radiance per upward ordinate (21 of the 42, and 321 of the 642 ordinates
+  have μ > 0; per-ordinate spectra are written per direction grid to
+  `toa_mean_radiance.csv` and `toa_mean_radiance_642.csv`).
 
 Six comparison pairs (B − A): SC↔chain per δ, δ-on↔δ-off per method,
 octree↔unigrid-chain per δ. Plus the **accuracy ranking**: every run
@@ -185,27 +204,36 @@ against `octree_ref_dM0` (`ranking.csv`).
 
 ### 4.1 Convergence and efficiency
 
-| run | transport | δ-M | n_iter | converged | wall [s] | ⟨J⟩ | mean F_z @TOA |
-|---|---|---|---|---|---|---|---|
-| `uni_chain_dM0` | chain | off | 32 | ✓ | 3.4 | 0.5188 | −2.5215 |
-| `uni_chain_dM1` | chain | M=1 | **12** | ✓ | 1.5 | 0.5188 | −2.5214 |
-| `uni_sc_dM0`    | sc    | off | 44 | ✓ | 24.7 | 0.4632 | −2.5935 |
-| `uni_sc_dM1`    | sc    | M=1 | **12** | ✓ | 7.0 | 0.4633 | −2.5933 |
-| `octree_dM0`    | octree march | off | 30 | ✓ | 95.3 | 0.4014 | −2.5312 |
-| `octree_dM1`    | octree march | M=1 | **12** | ✓ | 47.5 | 0.4016 | −2.5308 |
-| `uni_chain48_dM1` | chain 48³ | M=1 | 13 | ✓ | 19.5 | 0.5194 | −2.5223 |
-| `uni_sc48_dM1`    | sc 48³    | M=1 | 12 | ✓ | 32.4 | 0.4640 | −2.5927 |
-| `octree_d4_dM1`   | octree march d4 | M=1 | 12 | ✓ | 74.5 | 0.4114 | −2.5319 |
-| `octree_ref_dM1`  | octree march d5 | M=1 | 12 | ✓ | 132.3 | 0.3841 | −2.5319 |
-| `octree_ref_dM0`  | octree march d5 | off | 27 | ✓ | 231.6 | 0.3840 | −2.5320 |
+| run | transport | δ-M | N_dir | n_iter | converged | wall [s] | ⟨J⟩ | mean F_z @TOA |
+|---|---|---|---|---|---|---|---|---|
+| `uni_chain_dM0` | chain | off | 42 | 32 | ✓ | 1.6 | 0.5188 | −2.5215 |
+| `uni_chain_dM1` | chain | M=1 | 42 | **12** | ✓ | 0.7 | 0.5188 | −2.5214 |
+| `uni_sc_dM0`    | sc    | off | 42 | 51 | ✓ | 16.6 | 0.4632 | −2.5935 |
+| `uni_sc_dM1`    | sc    | M=1 | 42 | **12** | ✓ | 4.1 | 0.4633 | −2.5933 |
+| `octree_dM0`    | octree march | off | 42 | 30 | ✓ | 37.9 | 0.4014 | −2.5312 |
+| `octree_dM1`    | octree march | M=1 | 42 | **12** | ✓ | 20.7 | 0.4016 | −2.5308 |
+| `uni_chain48_dM1` | chain 48³ | M=1 | 42 | 13 | ✓ | 5.4 | 0.5194 | −2.5223 |
+| `uni_sc48_dM1`    | sc 48³    | M=1 | 42 | 12 | ✓ | 15.9 | 0.4640 | −2.5927 |
+| `octree_d4_dM1`   | octree march d4 | M=1 | 42 | 12 | ✓ | 33.0 | 0.4114 | −2.5319 |
+| `octree_ref_dM1`  | octree march d5 | M=1 | 642 | 34 | ✓ | 3393.7 | 0.3778 | −2.5073 |
+| `octree_ref_dM0`  | octree march d5 | off | 642 | 23 | ✓ | 2367.4 | 0.3778 | −2.5074 |
 
-- **delta-M is a large accelerator in this regime**: 32 → 12 (chain),
-  44 → 12 (SC), 30 → 12 (octree d3), 27 → 12 (reference grid) iterations;
-  wall time drops by ~2× everywhere and by 3.5× for SC.
+- **delta-M is a large accelerator at 42 ordinates**: 32 → 12 (chain),
+  51 → 12 (SC), 30 → 12 (octree d3) iterations; wall time drops by ~2×
+  everywhere and by ~4× for SC.
+- **but not at 642 ordinates**: on the reference grid δ-M *increases* the
+  iteration count (23 off → 34 on) and hence the wall time (2367 → 3394 s).
+  The acceleration benefit is angular-grid dependent — at 42 ordinates the
+  row-normalized HG operator at g ≈ 0.95 is extremely forward-peaked and
+  removing its g¹ moment pays; at 642 ordinates it no longer does.
 - The unigrid TOA mean F_z reproduces the MANUAL §11 numbers exactly
   (−2.5215 unigrid, −2.5312 octree d3).
+- **the 42 → 642 ordinate step moves the reference itself**: ⟨J⟩
+  0.3840 → 0.3778 (−1.6%) and mean F_z @TOA −2.5320 → −2.5074 (+1.0%) —
+  the 42-ordinate angular error inflates in-domain J and makes the net TOA
+  flux too negative even on the well-resolved octree.
 - **δ-M equivalence at the finest grid**: `octree_ref_dM1` vs
-  `octree_ref_dM0` differ by 0.19% max / 0.01% mean in J — half the
+  `octree_ref_dM0` differ by 0.19% max / 0.005% mean in J — half the
   depth-3 gap (1.3%), confirming the O(τ_cell) scaling of the explicit
   term and that the reference is δ-M-independent.
 
@@ -216,18 +244,23 @@ against `octree_ref_dM0` (`ranking.csv`).
 Band-mean J profiles (8 base-cell bands, `profiles.csv`; δ-on/off pairs
 agree to ≤3e−4, δ-off values shown):
 
-| z [m] | chain 24³ | SC 24³ | octree d3 | chain 48³ | SC 48³ | octree d4 | reference |
+| z [m] | chain 24³ | SC 24³ | octree d3 | chain 48³ | SC 48³ | octree d4 | reference (642 ord.) |
 |---|---|---|---|---|---|---|---|
-| 0.625 | 0.4372 | 0.3680 | 0.3095 | 0.4382 | 0.3660 | 0.3102 | 0.3192 |
-| 3.125 | 0.4529 | 0.3629 | 0.3431 | 0.4539 | 0.3636 | 0.3587 | 0.3187 |
-| 4.375 | 0.4964 | 0.4077 | 0.4154 | 0.4974 | 0.4105 | 0.4143 | 0.3296 |
-| 6.875 | 0.5870 | 0.5631 | 0.5377 | 0.5872 | 0.5642 | 0.5443 | 0.5512 |
-| 9.375 | 0.5893 | 0.5712 | 0.5850 | 0.5894 | 0.5709 | 0.5849 | 0.5849 |
+| 0.625 | 0.4372 | 0.3680 | 0.3095 | 0.4382 | 0.3660 | 0.3102 | 0.3388 |
+| 3.125 | 0.4529 | 0.3629 | 0.3431 | 0.4539 | 0.3636 | 0.3587 | 0.3096 |
+| 4.375 | 0.4964 | 0.4077 | 0.4154 | 0.4974 | 0.4105 | 0.4143 | 0.3186 |
+| 6.875 | 0.5870 | 0.5631 | 0.5377 | 0.5872 | 0.5642 | 0.5443 | 0.5517 |
+| 9.375 | 0.5893 | 0.5712 | 0.5850 | 0.5894 | 0.5709 | 0.5849 | 0.5840 |
 
 Note the reference column: in the cloud core (z = 3.1–4.4 m) the reference
-J is far *lower* (0.32–0.33) than every depth-3-or-coarser run
+J is far *lower* (0.31–0.32) than every depth-3-or-coarser run
 (0.41–0.50) — the coarse grids overestimate in-cloud radiation trapping;
-only the depth-4/5 octree resolution comes close.
+only the depth-4/5 octree resolution comes close. Compared with the
+42-ordinate reference of the previous study version, the 642-ordinate
+reference lowers the cloud-core bands further (0.319/0.330 → 0.310/0.319)
+and raises the bottom band (0.319 → 0.339): part of the old
+octree-d3↔reference agreement in the bottom band was angular-error
+cancellation.
 
 ![J difference maps](../plot/compare_transport/j_diff.png)
 
@@ -274,9 +307,10 @@ boundary at 0.156 m. delta-M changes σ² by ≤0.3%.
   octree agree closely at all μ; SC collapses at grazing ordinates
   (μ = 0.10: 0.032 vs 0.088 chain / 0.041 octree) — the SC wrap-ring /
   grazing-path error — and lies between chain and octree at μ ≳ 0.7.
-- Domain-mean upward radiance: chain 0.179, octree 0.170, SC 0.142
-  [F₀ sr⁻¹]; consistently, the TOA net flux is least upward-escaping for
-  SC (mean F_z −2.5935 vs −2.5215/−2.5312).
+- Domain-mean upward radiance: chain 0.179, octree 0.170, SC 0.142,
+  reference (642 ord.) 0.168 [F₀ sr⁻¹]; consistently, the TOA net flux is
+  least upward-escaping for SC (mean F_z −2.5935 vs −2.5215/−2.5312,
+  reference −2.5074).
 
 ### 4.5 Pair statistics (from `pair_stats.csv`)
 
@@ -298,112 +332,139 @@ Relative differences of B − A, normalised by max|A| of the reference run
 
 All pairwise numbers above compare approximations *to each other*. Ranking
 needs a solution that is demonstrably closer to the continuum limit: the
-fine-octree reference `octree_ref_dM0` (section 2.6). Errors below are
-relative to max|·| of the reference field on the common lattice
-(`ranking.csv`, `err_bars.png`, `j_err_maps.png`).
+fine-octree, **642-ordinate** reference `octree_ref_dM0` (section 2.6).
+Errors below are relative to max|·| of the reference field on the common
+lattice (`ranking.csv`, `err_bars.png`, `j_err_maps.png`). Because the
+reference resolves angle 15× better than the development grid, the errors
+of the 42-ordinate runs below are *space + angle* errors together — which
+is exactly what one wants when asking how far a practical run is from the
+truth.
 
 ### 5.1 Ranking
 
 | run | wall [s] | J err max | J err mean | σ² err max | F⁺ err max | ΔF_z @TOA |
 |---|---|---|---|---|---|---|
-| `octree_ref_dM1` | 132.3 | 0.2% | **0.005%** | 0.1% | 0.0% | +0.0001 |
-| `octree_d4_dM1` | 74.5 | 6.1% | **0.22%** | 7.4% | 1.7% | +0.0001 |
-| `octree_dM1` | 47.5 | 8.3% | **0.47%** | 9.6% | 1.5% | +0.0011 |
-| `octree_dM0` | 95.3 | 9.6% | 0.47% | 9.6% | 1.4% | +0.0008 |
-| `uni_chain48_dM1` | 19.5 | 16.1% | **2.7%** | 16.4% | 23.7% | +0.010 |
-| `uni_chain_dM1` | 1.5 | 18.3% | **2.7%** | 23.5% | 23.5% | +0.010 |
-| `uni_chain_dM0` | 3.4 | 18.3% | 2.7% | 23.6% | 23.6% | +0.010 |
-| `uni_sc48_dM1` | 32.4 | 30.2% | **6.8%** | 41.9% | 40.6% | −0.061 |
-| `uni_sc_dM1` | 7.0 | 27.6% | **6.9%** | 42.8% | 39.7% | −0.061 |
-| `uni_sc_dM0` | 24.7 | 27.7% | 6.9% | 42.8% | 39.8% | −0.061 |
+| `octree_ref_dM1` | 3393.7 | 0.2% | **0.005%** | 0.1% | 0.0% | +0.0001 |
+| `octree_d4_dM1` | 33.0 | 11.9% | **1.85%** | 12.9% | 14.1% | −0.0245 |
+| `octree_dM1` | 20.7 | 11.9% | **1.92%** | 14.1% | 14.9% | −0.0235 |
+| `octree_dM0` | 37.9 | 11.9% | 1.91% | 14.0% | 14.9% | −0.0238 |
+| `uni_chain48_dM1` | 5.4 | 16.7% | **3.46%** | 17.7% | 20.7% | −0.0150 |
+| `uni_chain_dM1` | 0.7 | 20.6% | **3.47%** | 24.7% | 20.6% | −0.0140 |
+| `uni_chain_dM0` | 1.6 | 20.6% | 3.46% | 24.7% | 20.6% | −0.0142 |
+| `uni_sc48_dM1` | 15.9 | 36.2% | **6.18%** | 43.4% | 37.6% | −0.0853 |
+| `uni_sc_dM1` | 4.1 | 33.2% | **6.29%** | 44.2% | 37.5% | −0.0860 |
+| `uni_sc_dM0` | 16.6 | 33.2% | 6.30% | 44.2% | 37.6% | −0.0861 |
 
-(reference `octree_ref_dM0` = 0 by construction; ΔF_z relative to −2.5320:
-chain +0.4%, SC −2.4%, octree d3 +0.03%)
+(reference `octree_ref_dM0` = 0 by construction; ΔF_z relative to −2.5074:
+chain −0.6%, SC −3.4%, octree d3 −0.9%; Δ⟨J⟩: chain +0.141, SC +0.086,
+octree d3 +0.024)
 
 ![J error maps vs reference](../plot/compare_transport/j_err_maps.png)
 ![error bars](../plot/compare_transport/err_bars.png)
 
-**Accuracy order: octree ≫ unigrid chain > unigrid SC.** The octree is
-6–15× more accurate than chain and 15× more accurate than SC in domain-mean
-J error; at TOA flux the gap is even larger (0.4% vs 24% chain, 2.4% vs
-10% SC mean F⁺ error).
+**Accuracy order: octree > unigrid chain > unigrid SC** (mean J error
+1.9% vs 3.5% vs 6.3%). The gaps are much *narrower* than against the
+42-ordinate reference of the previous study version (0.5% vs 2.7% vs
+6.9%): with the angular error no longer cancelling, all 42-ordinate runs
+sit near a common **angular error floor**, and the octree's spatial
+advantage (which is real — see 5.2) is partly masked by it.
 
 ### 5.2 Convergence evidence (why the ranking is meaningful)
 
 ![J convergence](../plot/compare_transport/j_convergence.png)
 ![TOA convergence](../plot/compare_transport/toa_convergence.png)
 
-- **Octree** (exact marches, error = cell-size error): mean J error
-  0.47% (d3) → 0.22% (d4) → reference (d5); max error 9.6% → 6.1% → 0.
-  Roughly halving per refinement level — the octree sequence converges
-  toward the reference.
-- **Unigrid chain** 24³ → 48³ (8× cells): mean error 2.74% → 2.69%,
-  max 18.3% → 16.1% — *barely moves*. The chain error is dominated by the
-  **grazing-ordinate stencil direction error**: each ordinate is marched
-  along the best *integer lattice direction*, an angular error that does
-  not shrink when h shrinks at fixed 42 ordinates. It converges with
-  N_dir (phase 6), not with h.
-- **Unigrid SC** 24³ → 48³: mean 6.92% → 6.79%, max 27.7% → 30.2% — also
-  dominated by the angular grazing-ordinate wrap-ring error (section 4.4),
-  not by cell size.
+- **Octree** d3 → d4 (both 42 ordinates): mean J error 1.91% → 1.85%,
+  max 11.9% → 11.9% — *flat*, in stark contrast to the 0.47% → 0.22%
+  halving measured against the 42-ordinate reference. Against the
+  642-ordinate reference the octree's 42-ordinate **angular** error
+  (~1.9% mean, ~12% max) dominates its remaining cell-size error.
+- **Unigrid chain** 24³ → 48³ (8× cells): mean error 3.46% → 3.46%,
+  max 20.6% → 16.7% — the mean is pinned at the angular floor; the
+  remaining error is dominated by the **grazing-ordinate stencil
+  direction error** (an angular error that does not shrink with h at
+  fixed 42 ordinates) plus the common quadrature error.
+- **Unigrid SC** 24³ → 48³: mean 6.30% → 6.18%, max 33.2% → 36.2% —
+  likewise dominated by the angular grazing-ordinate wrap-ring error
+  (section 4.4), not by cell size.
+- **The reference's own angular error**: moving the reference grid from
+  42 to 642 ordinates changed ⟨J⟩ by 1.6% and TOA F_z by 1.0% — so the
+  42-ordinate quadrature error is a ~1–2% effect on scalars even for the
+  octree, and the 642-ordinate reference's remaining angular error is
+  correspondingly smaller again.
 
-So the unigrid↔reference gap is an *angular path* error of the unigrid
-transport algorithms at the 42-ordinate development grid; the octree's
-exact marches remove it, which is why the octree wins by so much and why
-refining the unigrid alone does not close the gap. (This refines the
-earlier statement in this report that both errors are "first-order-ish in
-h": the *cell-size* part is, but on this grid the *stencil-direction*
-part dominates and is h-independent.)
+Putting the two rankings together: the octree's *cell-size* error really
+does halve per refinement level (0.47% → 0.22% → 0 when the angle is held
+at 42 ordinates), but at 42 ordinates every scheme additionally carries a
+scheme-dependent *angular* error (octree ~1.9%, chain ~3.5%, SC ~6.3%
+mean) that only N_dir removes. The unigrid schemes' angular error is the
+grazing-ordinate stencil/wrap error of section 4.4 — much larger than the
+octree's pure quadrature error, which is why the octree still wins the
+ranking and why refining the unigrid alone does not close the gap.
 
 ### 5.3 Verdict
 
-- **Most accurate** (of the original six): `octree_dM1` — 0.47% mean J
-  error, 1.5% max TOA flux error, 47.5 s. The fine reference grid with
-  δ-M (`octree_ref_dM1`, 132 s) reproduces the δ-off reference to 0.005%
-  mean and is the right choice when the answer itself is the goal.
+- **Most accurate** (of the original six): `octree_dM1` — 1.9% mean J
+  error against the 642-ordinate reference (0.47% against the
+  42-ordinate one), 20.7 s. The fine reference grid itself
+  (`octree_ref_dM0`, 2367 s) is the right choice when the answer itself
+  is the goal; its δ-M twin reproduces it to 0.005% mean but is *slower*
+  (3394 s) because δ-M no longer accelerates at 642 ordinates.
 - **Best accuracy per cost**: `octree_dM1` for physically trustworthy
-  fields; `uni_chain_dM1` (1.5 s, 2.7% mean error) is the cheap workhorse
-  when 3% is acceptable — but its error is angular and will not shrink
+  fields; `uni_chain_dM1` (0.7 s, 3.5% mean error) is the cheap workhorse
+  when 4% is acceptable — but its error is angular and will not shrink
   with grid refinement at 42 ordinates.
-- **delta-M on strictly dominates off** at every grid and scheme: same
-  converged fields (≤1.3% max, ≤0.05% mean), 2–3.5× less wall time. At
-  cloud-core g ≈ 0.95 it should be the default.
+- **delta-M on dominates off at 42 ordinates** (same converged fields,
+  ≤1.3% max, 2–4× less wall time), but **not at 642** (34 vs 23
+  iterations on the reference grid). At cloud-core g ≈ 0.95 with the
+  development grid it should be the default; on finely-resolved angular
+  grids it is at best neutral.
 - **SC is dominated on both axes**: less accurate *and* more expensive
-  than chain at identical grids (24³: 6.9% @ 7.0 s vs 2.7% @ 1.5 s).
+  than chain at identical grids (24³: 6.3% @ 4.1 s vs 3.5% @ 0.7 s).
 
 ---
 
 ## 6. Findings
 
-1. **delta-M (M = 1) does exactly what it should**: it cuts the iteration
-   count to 12 for every scheme (from 32/44/30/27), and the converged
-   fields agree with the δ-off runs to ≤1.3% max / ≤0.05% mean — the
-   residual is the known O(τ_cell) explicit-term quadrature gap (it
-   halves to 0.19% at the finest grid), not a physics change. At the
-   cloud-core g ≈ 0.95 it should be the default setting.
-2. **Against the fine reference, the accuracy order is octree ≫ chain >
-   SC** (mean J error 0.5% vs 2.7% vs 6.9%). The unigrid↔reference gap is
-   dominated by the *angular* grazing-ordinate errors of both unigrid
-   schemes and does not shrink from 24³ to 48³; the octree's exact
-   marches remove it, and the octree error then converges normally with
-   refinement (0.47% → 0.22% → 0).
+1. **delta-M (M = 1) does what it should at 42 ordinates**: it cuts the
+   iteration count to 12 for every scheme (from 32/51/30), and the
+   converged fields agree with the δ-off runs to ≤1.3% max / ≤0.05% mean
+   — the residual is the known O(τ_cell) explicit-term quadrature gap
+   (it halves to 0.19% at the finest grid), not a physics change. At the
+   cloud-core g ≈ 0.95 with the development grid it should be the default
+   setting. **New**: at 642 ordinates the acceleration disappears (23 →
+   34 iterations on the reference grid) — the benefit is tied to the
+   coarse, strongly row-normalized 42-ordinate HG operator.
+2. **Against the 642-ordinate reference, the accuracy order is octree >
+   chain > SC** (mean J error 1.9% vs 3.5% vs 6.3%) — but all three sit
+   near a common *angular error floor* of the 42-ordinate development
+   grid: refining the octree d3 → d4 or the unigrid 24³ → 48³ barely
+   moves the mean error any more. The octree's *cell-size* error still
+   converges normally (0.47% → 0.22% → 0 against the 42-ordinate
+   reference); what the new ranking exposes is that at 42 ordinates the
+   angular part dominates for every scheme — smallest for the octree
+   (pure quadrature error), much larger for the unigrid schemes
+   (grazing-ordinate stencil/wrap errors).
 3. **SC is systematically more diffusive**: lower J inside and below the
    cloud, deeper TOA shadow, collapsed grazing-ordinate radiance, and a
-   ~2.4% too-small net upward flux at TOA. It is also ~5× slower per
+   ~3.4% too-small net upward flux at TOA. It is also ~5× slower per
    iteration than chain on the unigrid (wrap-around ring passes).
 4. **The octree buys both resolution and path fidelity**: finer cells
    where κ_e demands them (0.078 m in the reference cloud core) *and*
    marching along the true ordinate directions; its exact-march transport
    removes the chain's grazing-ordinate stencil error, which is why
    unigrid-chain vs. octree is the manual's anchor-5 pattern.
-5. **δ-M is scheme- and grid-agnostic**: the δ-on↔δ-off differences are
-   ~2 orders of magnitude smaller than any scheme comparison, so the
-   comparison is not confounded by the scattering-operator split.
-6. **Open point for phase 6**: the ranking is made at fixed 42 ordinates;
-   the common angular error of *all* runs (including the reference) is
-   not captured here. The unigrid schemes' h-independent stencil/wrap
-   errors are expected to shrink with N_dir — the direction-convergence
-   study should re-run this ranking at refinement 2/3.
+5. **δ-M is scheme- and grid-agnostic in the converged solution**: the
+   δ-on↔δ-off differences are ~2 orders of magnitude smaller than any
+   scheme comparison, so the comparison is not confounded by the
+   scattering-operator split (its *iteration* benefit is not
+   angular-grid-agnostic — see 1).
+6. **Angular error is now measured, not assumed**: the 42 → 642 ordinate
+   step on the reference grid moves ⟨J⟩ by 1.6% and TOA F_z by 1.0%, and
+   the ranking gaps of the 42-ordinate runs are dominated by their
+   angular error. The full direction-convergence study (42/162/642 for
+   all schemes, phase 6) should re-run this ranking to complete the
+   picture.
 
 ---
 
@@ -413,7 +474,7 @@ Self-contained vtk.js HTML (open directly in a browser — orbit, actor
 visibility toggling, colour maps; no server, no Python needed). One scene
 per run (κ_e isosurfaces at 0.5/1/2/3 m⁻¹ + J and σ² cut planes at
 x = 0, y = 0, z = 4) plus difference scenes (|ΔJ| isosurfaces + slices),
-all regenerated 2026-10-14 on Windows:
+all regenerated 2026-10-15 on macOS:
 
 ```
 plot/compare_transport/scene_uni_chain_dM0.html   scene_uni_chain_dM1.html
@@ -429,7 +490,9 @@ plot/compare_transport/scene_diff_ref_vs_octree3_dM0.html
 
 The three `ref_vs_*` scenes are the ranking story made visible: where each
 coarse run gets J wrong against the reference (chain: below/around the
-cloud; SC: everywhere diffuse; octree d3: cloud core only).
+cloud; SC: everywhere diffuse; octree d3: no longer just the cloud core —
+a broad few-percent pattern strongest in the anisotropic vacuum around
+the cloud, the angular error floor of the 42-ordinate ordinates).
 
 (pyvista's vtk.js export cannot carry volume mappers, hence slices +
 isosurfaces; the static volume overview is `vol_j.png`.)
@@ -438,10 +501,11 @@ isosurfaces; the static volume overview is `vol_j.png`.)
 
 | file | content |
 |---|---|
-| `summary.csv` | run table (grid, iterations, wall, ⟨J⟩, TOA F_z), all 11 runs |
+| `summary.csv` | run table (grid, N_dir, iterations, wall, ⟨J⟩, TOA F_z), all 11 runs |
 | `ranking.csv` | per-run error vs the reference (J, σ², F⁺, scalars) |
 | `profiles.csv` | band-mean J profiles, all 11 runs |
-| `toa_mean_radiance.csv` | per-ordinate domain-mean upward radiance at TOA |
+| `toa_mean_radiance.csv` | per-ordinate domain-mean upward radiance at TOA, 42-ordinate runs |
+| `toa_mean_radiance_642.csv` | same for the two 642-ordinate reference runs |
 | `pair_stats.csv` | max/mean relative differences of all six pairs × J, σ², F⁺ |
 | `j_slices.png`, `j_profiles.png`, `j_diff.png` | mean-intensity figures |
 | `j_err_maps.png` | \|J − J_ref\| at the cloud plane, every run vs reference |

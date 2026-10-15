@@ -16,8 +16,6 @@ every chain terminates at the top or bottom boundary and the dependency
 graph is a forest rooted at boundary-entry cells.
 """
 
-import itertools
-
 import numpy as np
 
 from rt3d.geometry import march_lattice, ray_box_exit
@@ -57,21 +55,27 @@ def stencil_for_direction(omega, h, max_offset=None):
     if max_offset is None:
         max_offset = int(min(24, max(3, np.ceil(3.0 * h.max() / h.min()))))
 
-    best_s, best_cos, best_norm2 = None, -np.inf, np.inf
-    for s in itertools.product(range(-max_offset, max_offset + 1), repeat=3):
-        if s == (0, 0, 0) or s[2] == 0:
-            continue
-        v = np.asarray(s, dtype=float) * h
-        norm = np.linalg.norm(v)
-        c = float(v @ omega) / norm
-        n2 = int(s[0] ** 2 + s[1] ** 2 + s[2] ** 2)
-        # prefer the larger angle match; break ties toward the shorter
-        # characteristic (better locality)
-        if c > best_cos + 1e-12 or (abs(c - best_cos) <= 1e-12 and n2 < best_norm2):
-            best_s, best_cos, best_norm2 = np.array(s), c, n2
-
-    if best_s is None:
+    # vectorized search over the (2r+1)^3 candidate box (the pure-Python
+    # loop cost minutes at r ~ 60 on strongly anisotropic lattices)
+    vals = np.arange(-max_offset, max_offset + 1, dtype=np.int64)
+    A, B, C = np.meshgrid(vals, vals, vals, indexing="ij")
+    s_all = np.column_stack([A.ravel(), B.ravel(), C.ravel()])
+    s_all = s_all[s_all[:, 2] != 0]  # s_z != 0 (and hence s != 0)
+    if s_all.shape[0] == 0:
         raise ValueError(f"no stencil found for omega={omega} within max_offset={max_offset}")
+
+    v = s_all.astype(float) * h
+    norm = np.sqrt(np.einsum("ij,ij->i", v, v))
+    cosv = (v @ omega) / norm
+    n2 = np.einsum("ij,ij->i", s_all, s_all)
+
+    # same preference as the reference loop: best cosine (within the 1e-12
+    # tolerance band), ties toward the shorter characteristic; exact ties
+    # keep the itertools.product order (stable)
+    band = np.flatnonzero(cosv >= cosv.max() - 1e-12)
+    pick = band[np.argmin(n2[band])]
+    best_s = s_all[pick]
+
     v = best_s * h
     return best_s, v / np.linalg.norm(v)
 
@@ -154,10 +158,17 @@ def build_chain(grid, omega, periodic_box=None, max_offset=None):
         'roots'      (R,) int flat indices of boundary-entry cells
         'waves'      list of (n_w,) int arrays, topological order; every
                      non-root cell appears in a wave strictly after its parent
-        'sub_cells'  (M, n_cells) int absolute indices of the sub-segment
-                     cells for non-root cells (parent -> target order)
+        'sub_cells'  removed in P4: see 'rel' / 'sub_delta' below
+        'rel'        (M, 3) int16 relative sub-segment cell offsets
+                     (parent -> target order); absolute cell indices are
+                     formed in the sweep from the wave cell indices
+                     (plan/optimization-plan.md P4: the old (M, n_cells)
+                     int64 table cost 228 MB @50^3, ~1.5 GB @100^3)
+        'sub_delta'  (M,) int64 flat-index delta rel_i + nx*rel_j +
+                     nx*ny*rel_k (non-periodic: cell = wave + delta)
+        'periodic'   bool, x/y-wrapped chain family
         'sub_len'    (M,) segment lengths
-        'root_steps' step-major march segments (root-local index, cell, length)
+        'root_steps' (ridx, cell, length) arrays, step-major march segments
                      from each root center backwards to the boundary entry
         'root_exit'  (R,) pair arrays (axis, side) of the boundary entry face
     """
@@ -204,24 +215,26 @@ def build_chain(grid, omega, periodic_box=None, max_offset=None):
         if w.size:
             waves.append(w)
 
-    # absolute sub-segment cell indices for non-root cells (parent -> target)
-    if periodic_box is not None:
-        wi = np.mod(i + rel[:, 0][:, None], grid.nx)
-        wj = np.mod(j + rel[:, 1][:, None], grid.ny)
-        wk = k + rel[:, 2][:, None]
-        sub_cells = grid.ravel(wi, wj, wk)
-    else:
-        sub_cells = grid.ravel(
-            i[None, :] + rel[:, 0][:, None],
-            j[None, :] + rel[:, 1][:, None],
-            k[None, :] + rel[:, 2][:, None],
-        )
+    # P4: the sub-segment cells of a non-root cell c are c + rel[m] (the
+    # straight path stays inside the parent..target bounding box, so for
+    # non-periodic chains the flat index is simply wave + sub_delta[m]);
+    # periodic chains wrap x/y, resolved in the sweep from the wave coords
+    rel = rel.astype(np.int16)
+    nxny = grid.nx * grid.ny
+    sub_delta = (
+        rel[:, 0].astype(np.int64)
+        + grid.nx * rel[:, 1].astype(np.int64)
+        + nxny * rel[:, 2].astype(np.int64)
+    )
 
     # boundary-entry chains: march from each root center backwards along
     # -vhat until the ray enters the domain (i.e. exits the box going back)
     root_steps, root_exit_t, rax, rsd = march_lattice(
         grid.centers[roots], -vhat, grid, periodic_box=periodic_box
     )
+    rs_r = np.concatenate([s_[0] for s_ in root_steps]).astype(np.int64)
+    rs_c = np.concatenate([s_[1] for s_ in root_steps]).astype(np.int64)
+    rs_l = np.concatenate([s_[2] for s_ in root_steps]).astype(np.float64)
 
     return {
         "s": s,
@@ -229,9 +242,11 @@ def build_chain(grid, omega, periodic_box=None, max_offset=None):
         "parent": parent,
         "roots": roots,
         "waves": waves,
-        "sub_cells": sub_cells,
+        "rel": rel,
+        "sub_delta": sub_delta,
+        "periodic": periodic_box is not None,
         "sub_len": lengths,
-        "root_steps": root_steps,
+        "root_steps": (rs_r, rs_c, rs_l),
         "root_exit_t": root_exit_t,
         "root_exit_axis": rax,
         "root_exit_side": rsd,

@@ -77,11 +77,10 @@ between machines; confirm with the sanity check below):
 | markdown | 3.11.1 (md→HTML for the browser print-to-PDF doc regeneration) |
 | pyvista | 0.49.1 (with vtk) |
 | trame-pyvista | 0.2.1 (pyvista vtk.js/HTML scene export; installed 2026-10-13 on macOS, 2026-10-14 on Windows) |
+| numba | 0.66.0 (+ llvmlite 0.48.0; JITs Python 3.14 / numpy 2.5 — used by the octree/unigrid fast paths in `rt3d/jit.py`, all with NumPy reference fallbacks) |
 
-**Not installed:** `numba`. Do not import it — or any other new dependency —
-without first installing it into `pyarts` and saying so explicitly.
-(`trame-pyvista` was installed 2026-10-13 for the interactive HTML 3D exports
-of `scripts/compare_transport.py`.)
+Do not add any new dependency without first installing it into `pyarts`
+and saying so explicitly.
 
 ## Repository layout
 

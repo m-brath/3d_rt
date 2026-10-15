@@ -76,6 +76,7 @@ class octree_grid(object):
         self.level_all = np.zeros(n_base, dtype=int)
         self.children_all = np.full((n_base, 8), -1, dtype=int)
         self.max_level = 0
+        self._version = 0  # bumped by split(); invalidates march_arrays()
 
         self._compact()
 
@@ -115,6 +116,7 @@ class octree_grid(object):
             [self.children_all, np.full((n_new, 8), -1, dtype=int)]
         )
         self.max_level = int(max(self.max_level, lvl.max()))
+        self._version += 1
 
     def leaves_all(self):
         """Indices of all current leaf nodes (node numbering)."""
@@ -163,7 +165,13 @@ class octree_grid(object):
         by at most one level.  Each face is probed at a 3x3 grid (transverse
         offsets -h/2, 0, +h/2) so that a deeper neighbor cell of any allowed
         size is always hit; the loop repeats until no splits remain.
+
+        The 54 probe passes use the parallel numba locate (rt3d.jit) when
+        available — bit-identical to octree_grid.locate, ~10x faster
+        (plan/optimization-plan.md, minor items).
         """
+        from rt3d.jit import HAVE_NUMBA, locate_jit
+
         while True:
             self._compact()  # refresh leaf tables for locate()
             leaves = self.leaves_all()
@@ -180,7 +188,10 @@ class octree_grid(object):
                             probe[:, trans[0]] += o1 * h
                             probe[:, trans[1]] += o2 * h
                             inside = self.cuboid.contains(probe)
-                            nb = np.where(inside, self.locate(probe), -1)
+                            if HAVE_NUMBA:
+                                nb = np.where(inside, locate_jit(probe, self), -1)
+                            else:
+                                nb = np.where(inside, self.locate(probe), -1)
                             nb_lvl = np.where(nb >= 0, self.level[nb], -1)
                             split |= nb_lvl > self.level_all[leaves] + 1
             if not split.any():
@@ -208,6 +219,53 @@ class octree_grid(object):
         self.kappa_s = np.zeros(self.n_leaf)
         self.g = np.zeros(self.n_leaf)
         self.T = np.zeros(self.n_leaf)
+
+    def march_arrays(self):
+        """
+        Plain contiguous node-table arrays + scalar parameters for the
+        numba kernels (rt3d.jit).  Cached; invalidated by split().
+
+        Returns
+        -------
+        dict with keys
+            'prm'          (12,) float64
+                (x0, x1, y0, y1, z0, z1, Lx, Ly, Lz, h0, eps, h_min) with
+                eps = 1e-9 * h_min the DDA re-locate offset
+            'prm_i'        (5,) int64
+                (nx0, ny0, nz0, max_level, periodic); the periodic flag is
+                set by the caller (0 = no wrap, 1 = x and y wrap)
+            'centers_all', 'half_all', 'children_all', 'leaf_of_node'
+                node-indexed tables (int64 index arrays)
+        """
+        cached = getattr(self, "_march_arrays", None)
+        if cached is not None and cached[0] == self._version:
+            return cached[1]
+        h_min = float(self.half.min()) * 2.0
+        prm = np.array(
+            [
+                self.box[0][0], self.box[0][1],
+                self.box[1][0], self.box[1][1],
+                self.box[2][0], self.box[2][1],
+                self.cuboid.Lx, self.cuboid.Ly, self.cuboid.Lz,
+                self.h0, 1e-9 * h_min, h_min,
+            ],
+            dtype=np.float64,
+        )
+        prm_i = np.array(
+            [self.nx0, self.ny0, self.nz0, self.max_level, 0], dtype=np.int64
+        )
+        arrays = {
+            "prm": prm,
+            "prm_i": prm_i,
+            "centers_all": np.ascontiguousarray(self.centers_all, dtype=np.float64),
+            "half_all": np.ascontiguousarray(self.half_all, dtype=np.float64),
+            "children_all": np.ascontiguousarray(self.children_all, dtype=np.int64),
+            "leaf_of_node": np.ascontiguousarray(self.leaf_of_node, dtype=np.int64),
+            "centers": np.ascontiguousarray(self.centers, dtype=np.float64),
+            "half": np.ascontiguousarray(self.half, dtype=np.float64),
+        }
+        self._march_arrays = (self._version, arrays)
+        return arrays
 
     # ------------------------------------------------------------- locate
 

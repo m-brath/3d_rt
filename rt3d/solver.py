@@ -50,6 +50,8 @@ def lambda_iteration(
     ng=None,
     delta_M=0,
     transport="chain",
+    jit=None,
+    n_jobs=1,
 ):
     """
     Plain lambda iteration for the monochromatic RTE.
@@ -110,6 +112,20 @@ def lambda_iteration(
         cell size), but local and gather-only.  Ignored on the octree
         (exact marches); transport="sc" with an octree grid raises
         ValueError.
+    jit : bool, optional
+        Octree exact marches: None (default) -> fused numba march+sweep
+        (rt3d.jit, plan/optimization-plan.md P1) when numba is available:
+        no segment arrays are materialised and each sweep re-marches in
+        compiled code parallel over rays.  False -> reference NumPy
+        march with precomputed segment arrays.  Ignored on the unigrid.
+    n_jobs : int, optional
+        Number of threads for the per-ordinate sweep loop
+        (plan/optimization-plan.md P3), by default 1 (sequential, the
+        original behaviour).  The ordinates are independent; the threads
+        share the read-only chain/march geometry and write disjoint
+        output columns I[:, d].  Most useful for the unigrid chain/SC
+        sweeps; the fused octree jit sweep is already parallel over rays
+        (numba prange), so n_jobs > 1 adds little there.
 
     Returns
     -------
@@ -126,6 +142,8 @@ def lambda_iteration(
         'kappa_e_delta' (n_cells,) extinction actually used for the
                    transport; equals kappa_e when delta_M == 0
         'transport' str, transport algorithm used ("chain" or "sc")
+        'jit'     bool, fused numba octree march/sweep used on the octree
+        'n_jobs'  int, thread count used for the per-ordinate sweeps
     """
     from rt3d.octree import octree_grid
 
@@ -204,7 +222,7 @@ def lambda_iteration(
             )
         chains = [
             precompute_octree_march(grid, dg.directions[d],
-                                    periodic_box=periodic_box)
+                                    periodic_box=periodic_box, jit=jit)
             for d in range(dg.n_dir)
         ]
     elif transport == "sc":
@@ -250,6 +268,12 @@ def lambda_iteration(
     converged = False
     I = np.zeros((n_cells, dg.n_dir))
 
+    use_jit_sweeps = not is_octree
+    if use_jit_sweeps:
+        from rt3d.jit import HAVE_NUMBA
+
+        use_jit_sweeps = HAVE_NUMBA
+
     def sweep_one(d, bottom_I=None):
         """One ordinate sweep with the selected transport method; the
         ground ordering, Ng, delta-M and the scattering matmul above are
@@ -258,6 +282,16 @@ def lambda_iteration(
             return sweep_direction_octree_exact(
                 grid, chains[d], kappa_e_delta, S[:, d], bc, bottom_I=bottom_I
             )
+        if use_jit_sweeps:
+            if transport == "sc":
+                from rt3d.jit import sc_sweep_jit
+
+                return sc_sweep_jit(grid, chains[d], kappa_e_delta, S[:, d],
+                                    bc, bottom_I=bottom_I)
+            from rt3d.jit import chain_sweep_jit
+
+            return chain_sweep_jit(grid, chains[d], kappa_e_delta, S[:, d],
+                                   bc, bottom_I=bottom_I)
         if transport == "sc":
             from rt3d.short_characteristics import sweep_direction_sc
 
@@ -268,29 +302,47 @@ def lambda_iteration(
             grid, chains[d], kappa_e_delta, S[:, d], bc, bottom_I=bottom_I
         )
 
+    def bottom_I_for(d, I_g):
+        """Per-ordinate ground inflow (Lambertian ground, phase 5)."""
+        if is_octree:
+            return I_g[chains[d]["entry_cell"]]
+        # ground radiance is a column field: chains with
+        # |s_z| > 1 root above the bottom layer (and SC stencil
+        # nodes clamp to k = 0), so the k = 0 values must tile
+        # over all layers for bottom-entry inflow
+        return np.tile(I_g[: grid.ny * grid.nx], grid.nz)
+
+    def sweep_group(ds, I_g=None):
+        """Sweep the ordinates in ds, filling I[:, d]; with n_jobs > 1
+        in parallel threads (independent ordinates, disjoint columns)."""
+        if n_jobs is not None and n_jobs > 1 and len(ds) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=min(n_jobs, len(ds))) as ex:
+                futs = [
+                    (d, ex.submit(sweep_one, d,
+                                  None if I_g is None else bottom_I_for(d, I_g)))
+                    for d in ds
+                ]
+                for d, fut in futs:
+                    I[:, d] = fut.result()
+        else:
+            for d in ds:
+                I[:, d] = sweep_one(
+                    d, None if I_g is None else bottom_I_for(d, I_g)
+                )
+
     for it in range(n_iter):
         if ground is None:
-            for d in range(dg.n_dir):
-                I[:, d] = sweep_one(d)
+            sweep_group(range(dg.n_dir))
         else:
             # downward ordinates first: they set the ground inflow
-            for d in dg.down_idx:
-                I[:, d] = sweep_one(d)
+            sweep_group(dg.down_idx)
             I_g = I_g_fixed.copy()
             I_g[mb] += ground.albedo * downward_irradiance(
                 I[:, dg.down_idx], dg
             )[mb] / np.pi
-            for d in dg.up_idx:
-                if is_octree:
-                    I[:, d] = sweep_one(d, bottom_I=I_g[chains[d]["entry_cell"]])
-                else:
-                    # ground radiance is a column field: chains with
-                    # |s_z| > 1 root above the bottom layer (and SC stencil
-                    # nodes clamp to k = 0), so the k = 0 values must tile
-                    # over all layers for bottom-entry inflow
-                    I[:, d] = sweep_one(
-                        d, bottom_I=np.tile(I_g[: grid.ny * grid.nx], grid.nz)
-                    )
+            sweep_group(dg.up_idx, I_g)
         S_new = scattering_source(
             I, dg, omega, B, Phi_w=Phi_w, g=g if g_cells is None else 0.0,
             beam_scat=beam_scat, g_cells=g_cells, Phi_cache=Phi_cache,
@@ -316,4 +368,7 @@ def lambda_iteration(
         "delta_M": int(delta_M),
         "kappa_e_delta": kappa_e_delta,
         "transport": transport,
+        "jit": bool(is_octree and any(
+            c.get("fused", False) for c in chains)),
+        "n_jobs": int(n_jobs),
     }

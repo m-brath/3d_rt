@@ -18,6 +18,12 @@ delta_M = 1).  Every run is ranked by its error against the reference, and
 the refinement sequence shows those errors shrink toward zero (discretization
 error, not physics).
 
+The two runs on the fine reference octree additionally use icosahedral
+refinement 3 = 642 ordinates instead of the 42-ordinate development grid, so
+the reference is finer in ANGLE as well as in space; the ranking of the
+42-ordinate runs therefore also measures their angular (ordinate-resolution)
+error, while the comparisons among the 42-ordinate runs still cancel it.
+
 Diagnostics per run: mean intensity J, angular variance of the intensity
 (1/4pi int (I - J)^2 dOmega), and the upward radiance at TOA (F^+(x,y) maps,
 per-ordinate domain-mean radiance).  All fields are sampled onto one common
@@ -68,8 +74,13 @@ LBL_X, LBL_Y, LBL_Z = "x  [m]", "y  [m]", "z  [m]"
 case = gaussian_cloud(omega_cap=0.9)
 box = case["box"]                              # x, y in [-5, 5], z in [0, 10] m
 
-dg = icosahedric_grid(n_refine=1)              # 42 ordinates (development grid)
-print(f"N_dir = {dg.n_dir},  sum(w) - 4pi = {dg.weights.sum() - 4*np.pi:.3e}")
+# direction grids keyed by icosahedral refinement: the comparison runs use
+# the 42-ordinate development grid; the two runs on the fine reference
+# octree (octree_ref_dM0/dM1) use refinement 3 = 642 ordinates
+DGS = {1: icosahedric_grid(n_refine=1), 3: icosahedric_grid(n_refine=3)}
+for _nr, _dg in DGS.items():
+    print(f"n_refine={_nr}: N_dir = {_dg.n_dir},  "
+          f"sum(w) - 4pi = {_dg.weights.sum() - 4*np.pi:.3e}")
 
 mu_sun = np.cos(np.radians(30.0))
 beam = {"omega_sun": np.array([np.sqrt(1.0 - mu_sun**2), 0.0, -mu_sun]),
@@ -119,35 +130,43 @@ for gname, g in GRIDS.items():
                          case["g"](*c.T), np.zeros(g.n_cells))
 
 # %% the runs
+# (key, grid, transport, delta_M, direction-grid icosahedral refinement)
 RUNS = [
-    ("uni_chain_dM0",   "u24",  "chain", 0),
-    ("uni_chain_dM1",   "u24",  "chain", 1),
-    ("uni_sc_dM0",      "u24",  "sc",    0),
-    ("uni_sc_dM1",      "u24",  "sc",    1),
-    ("octree_dM0",      "oct3", "chain", 0),
-    ("octree_dM1",      "oct3", "chain", 1),
-    ("uni_chain48_dM1", "u48",  "chain", 1),   # ranking / convergence runs
-    ("uni_sc48_dM1",    "u48",  "sc",    1),
-    ("octree_d4_dM1",   "oct4", "chain", 1),
-    ("octree_ref_dM1",  "oct5", "chain", 1),
-    ("octree_ref_dM0",  "oct5", "chain", 0),   # THE reference solution
+    ("uni_chain_dM0",   "u24",  "chain", 0, 1),
+    ("uni_chain_dM1",   "u24",  "chain", 1, 1),
+    ("uni_sc_dM0",      "u24",  "sc",    0, 1),
+    ("uni_sc_dM1",      "u24",  "sc",    1, 1),
+    ("octree_dM0",      "oct3", "chain", 0, 1),
+    ("octree_dM1",      "oct3", "chain", 1, 1),
+    ("uni_chain48_dM1", "u48",  "chain", 1, 1),   # ranking / convergence runs
+    ("uni_sc48_dM1",    "u48",  "sc",    1, 1),
+    ("octree_d4_dM1",   "oct4", "chain", 1, 1),
+    ("octree_ref_dM1",  "oct5", "chain", 1, 3),   # 642 ordinates
+    ("octree_ref_dM0",  "oct5", "chain", 0, 3),   # THE reference, 642 ordinates
 ]
 REF = "octree_ref_dM0"
 BASE6 = [k for k, *_ in RUNS[:6]]
+RUN_DG = {key: DGS[nref] for key, _, _, _, nref in RUNS}
 
 results, wall = {}, {}
 CACHE_DIR = os.path.join(OUT, "_solve_cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
-for key, gname, transport, dM in RUNS:
+for key, gname, transport, dM, nref in RUNS:
+    dg = RUN_DG[key]
     cf = os.path.join(CACHE_DIR, f"{key}.npz")
     if os.path.exists(cf):
         z = np.load(cf, allow_pickle=True)
-        results[key] = {k: z[k] for k in ("I", "J", "F", "S")}
-        results[key]["n_iter"] = int(z["n_iter"])
-        results[key]["converged"] = bool(z["converged"])
-        wall[key] = float(z["wall"])
-        print(f"{key:15s}  loaded from cache  wall={wall[key]:7.2f} s", flush=True)
-        continue
+        cached_ndir = int(z["n_dir"]) if "n_dir" in z.files else 42
+        if cached_ndir != dg.n_dir:
+            print(f"{key:15s}  cache is stale ({cached_ndir} ordinates != "
+                  f"{dg.n_dir}) — re-solving", flush=True)
+        else:
+            results[key] = {k: z[k] for k in ("I", "J", "F", "S")}
+            results[key]["n_iter"] = int(z["n_iter"])
+            results[key]["converged"] = bool(z["converged"])
+            wall[key] = float(z["wall"])
+            print(f"{key:15s}  loaded from cache  wall={wall[key]:7.2f} s", flush=True)
+            continue
     k_e, k_s, g_c, B_f = FIELDS[gname]
     t0 = time.perf_counter()
     results[key] = lambda_iteration(
@@ -159,7 +178,7 @@ for key, gname, transport, dM in RUNS:
     r = results[key]
     np.savez_compressed(cf, I=r["I"], J=r["J"], F=r["F"], S=r["S"],
                         n_iter=r["n_iter"], converged=r["converged"],
-                        wall=wall[key])
+                        wall=wall[key], n_dir=dg.n_dir)
     print(f"{key:15s}  n_iter={r['n_iter']:3d}  converged={r['converged']}  "
           f"wall={wall[key]:7.2f} s", flush=True)
 
@@ -186,12 +205,13 @@ for gname, g in GRIDS.items():
         # with IU varying along lattice axis 0 (x), KU along axis 2 (z)
         LAT_IDX[gname] = np.meshgrid(i, j, k, indexing="ij")[::-1]
 
-RUN_GRID = {key: gname for key, gname, _, _ in RUNS}
+RUN_GRID = {key: gname for key, gname, _, _, _ in RUNS}
 
 
-# angular variance per run (from the swept intensities)
+# angular variance per run (from the swept intensities, each on its own
+# direction grid)
 for key, *_ in RUNS:
-    results[key]["var"] = angular_variance(results[key]["I"], dg)
+    results[key]["var"] = angular_variance(results[key]["I"], RUN_DG[key])
 
 
 def lat_field(key, name):
@@ -230,6 +250,7 @@ def toa_stats(key):
     """Domain-mean upward radiance per upward ordinate + mean F_z at the top layer."""
     r = results[key]
     gname = RUN_GRID[key]
+    dg = RUN_DG[key]
     g = GRIDS[gname]
     if IS_OCT[gname]:
         top = g.centers[:, 2] + g.half >= box.z1 - 1e-9
@@ -245,21 +266,21 @@ def toa_stats(key):
 
 toa = {key: toa_stats(key) for key, *_ in RUNS}
 
-print("\nrun               transport  delta_M  n_iter  conv  wall [s]  "
+print("\nrun               transport  delta_M  N_dir  n_iter  conv  wall [s]  "
       "<J>      mean F_z @TOA")
 rows = []
-for key, gname, transport, dM in RUNS:
+for key, gname, transport, dM, nref in RUNS:
     r = results[key]
     meanJ = r["J"].mean()
-    rows.append((key, gname, transport, dM, r["n_iter"], r["converged"], wall[key],
-                 meanJ, toa[key][1]))
-    print(f"{key:15s}  {transport:9s}  {dM:7d}  {r['n_iter']:6d}  "
+    rows.append((key, gname, transport, dM, RUN_DG[key].n_dir, r["n_iter"],
+                 r["converged"], wall[key], meanJ, toa[key][1]))
+    print(f"{key:15s}  {transport:9s}  {dM:7d}  {RUN_DG[key].n_dir:5d}  {r['n_iter']:6d}  "
           f"{str(r['converged']):5s}  {wall[key]:8.2f}  {meanJ:.4f}  {toa[key][1]:+.4f}")
 
 with open(os.path.join(OUT, "summary.csv"), "w") as fh:
-    fh.write("run,grid,transport,delta_M,n_iter,converged,wall_s,mean_J,mean_Fz_TOA\n")
-    for k, gn, t, d, it, cv, w, j, fz in rows:
-        fh.write(f"{k},{gn},{t},{d},{it},{int(cv)},{w:.3f},{j:.6f},{fz:.6f}\n")
+    fh.write("run,grid,transport,delta_M,n_dir,n_iter,converged,wall_s,mean_J,mean_Fz_TOA\n")
+    for k, gn, t, d, nd, it, cv, w, j, fz in rows:
+        fh.write(f"{k},{gn},{t},{d},{nd},{it},{int(cv)},{w:.3f},{j:.6f},{fz:.6f}\n")
 
 # delta-M equivalence check: converged J must not depend on delta_M (same grid)
 for base in ("uni_chain", "uni_sc", "octree", "octree_ref"):
@@ -287,8 +308,8 @@ RUN_TITLES = {
     "uni_chain48_dM1": "unigrid chain 48^3, dM on",
     "uni_sc48_dM1":    "unigrid SC 48^3,    dM on",
     "octree_d4_dM1":   "octree depth 4,     dM on",
-    "octree_ref_dM1":  "octree ref grid,    dM on",
-    "octree_ref_dM0":  "REFERENCE (octree ref grid, dM off)",
+    "octree_ref_dM1":  "octree ref grid,  dM on, 642 ord.",
+    "octree_ref_dM0":  "REFERENCE (octree ref grid, dM off, 642 ord.)",
 }
 
 xe = np.concatenate([gx - h_min / 2, [gx[-1] + h_min / 2]])
@@ -323,7 +344,7 @@ nband = int(round(box.Lz / GRIDS["oct3"].h0))
 zband = np.linspace(box.z0, box.z1, nband + 1)
 zc = 0.5 * (zband[:-1] + zband[1:])
 profiles = {}
-for key, gname, _, _ in RUNS:
+for key, gname, *_ in RUNS:
     J = results[key]["J"]
     zi = np.clip(((GRIDS[gname].centers[:, 2] - box.z0) / GRIDS["oct3"].h0).astype(int),
                  0, nband - 1)
@@ -334,7 +355,8 @@ for key in BASE6:
     style = "--" if key.startswith("octree") else "-"
     style += "." if key.endswith("dM1") else ""
     ax.plot(profiles[key], zc, style, label=RUN_TITLES[key])
-ax.plot(profiles[REF], zc, "-k", lw=2.2, label="reference (fine octree)")
+ax.plot(profiles[REF], zc, "-k", lw=2.2,
+        label=f"reference (fine octree, {RUN_DG[REF].n_dir} ord.)")
 ax.set_xlabel(r"band-mean $J\,/F_0$")
 ax.set_ylabel(LBL_Z)
 ax.set_title("band-mean $J$ profiles (8 base-cell bands)")
@@ -404,6 +426,7 @@ def fup_map(key):
     """F^+(x, y) at the top of the domain on the common lattice (nxl, nyl)."""
     r = results[key]
     gname = RUN_GRID[key]
+    dg = RUN_DG[key]
     g = GRIDS[gname]
     w_up = dg.weights[dg.up_idx] * dg.directions[dg.up_idx, 2]
     if IS_OCT[gname]:
@@ -453,15 +476,23 @@ fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.01)
 fig.savefig(os.path.join(OUT, "toa_fup_diff.png"), dpi=130)
 plt.close(fig)
 
+def mu_spec(key):
+    """(mu sorted, domain-mean upward radiance) for a run on its own grid."""
+    dg = RUN_DG[key]
+    mu = dg.directions[dg.up_idx, 2]
+    order = np.argsort(mu)
+    return mu[order], toa[key][0][order]
+
+
 fig, ax = plt.subplots(figsize=(6.2, 4.6))
-mu_up = dg.directions[dg.up_idx, 2]
-order = np.argsort(mu_up)
 for key in BASE6:
     style = "--" if key.startswith("octree") else "-"
     style += "." if key.endswith("dM1") else ""
-    ax.plot(mu_up[order], toa[key][0][order], style, label=RUN_TITLES[key])
-ax.plot(mu_up[order], toa[REF][0][order], "-k", lw=2.2,
-        label="reference (fine octree)")
+    mu_k, I_k = mu_spec(key)
+    ax.plot(mu_k, I_k, style, label=RUN_TITLES[key])
+mu_r, I_r = mu_spec(REF)
+ax.plot(mu_r, I_r, "-k", lw=1.6, alpha=0.85,
+        label=f"reference (fine octree, {RUN_DG[REF].n_dir} ord.)")
 ax.set_xlabel(r"$\mu = \cos\vartheta$")
 ax.set_ylabel(r"domain-mean upward $I\,/F_0$ [sr$^{-1}$]")
 ax.set_title("TOA upward radiance vs ordinate direction")
@@ -470,10 +501,19 @@ fig.tight_layout()
 fig.savefig(os.path.join(OUT, "toa_mu_spectra.png"), dpi=130)
 plt.close(fig)
 
-np.savetxt(os.path.join(OUT, "toa_mean_radiance.csv"),
-           np.column_stack([mu_up] + [toa[k][0] for k, *_ in RUNS]),
-           delimiter=",", fmt="%.6f",
-           header="mu," + ",".join(k for k, *_ in RUNS), comments="")
+# per-ordinate spectra are only mutually comparable within one direction
+# grid -> one CSV per direction grid used in the study
+for nref, keys in ((1, [k for k, *_, nr in RUNS if nr == 1]),
+                   (3, [k for k, *_, nr in RUNS if nr == 3])):
+    if not keys:
+        continue
+    mu_g = DGS[nref].directions[DGS[nref].up_idx, 2]
+    fname = ("toa_mean_radiance.csv" if DGS[nref].n_dir == 42
+             else f"toa_mean_radiance_{DGS[nref].n_dir}.csv")
+    np.savetxt(os.path.join(OUT, fname),
+               np.column_stack([mu_g] + [toa[k][0] for k in keys]),
+               delimiter=",", fmt="%.6f",
+               header="mu," + ",".join(keys), comments="")
 
 # %% quantitative pair statistics (B - A), quoted in docs/compare-transport.md
 print("\npair (B - A)                     field   max rel diff   mean rel diff")
@@ -496,11 +536,13 @@ with open(os.path.join(OUT, "pair_stats.csv"), "w") as fh:
         fh.write(f'"{ttl}",{name},{rel:.6f},{mean_rel:.6f}\n')
 
 # %% accuracy ranking vs the reference run (plan/transport-ranking-plan.md)
-print(f"\naccuracy vs reference '{REF}'")
-print("run               grid  transport  dM  n_iter  wall [s]   "
+# note: the reference uses 642 ordinates, so the errors of the 42-ordinate
+# runs below include their angular (ordinate-resolution) error as well
+print(f"\naccuracy vs reference '{REF}' ({RUN_DG[REF].n_dir} ordinates)")
+print("run               grid  transport  dM  N_dir  n_iter  wall [s]   "
       "J err max/mean      var err max/mean      F+ err max/mean      d<J>     dFz_TOA")
 rank_rows = []
-for key, gname, transport, dM in RUNS:
+for key, gname, transport, dM, nref in RUNS:
     if key == REF:
         continue
     errs = {}
@@ -515,20 +557,21 @@ for key, gname, transport, dM in RUNS:
     errs["F_plus_TOA"] = (d.max() / ref_max, (d / ref_max).mean())
     dJm = results[key]["J"].mean() - results[REF]["J"].mean()
     dFz = toa[key][1] - toa[REF][1]
-    rank_rows.append((key, gname, transport, dM, results[key]["n_iter"],
-                      wall[key], errs, dJm, dFz))
-    print(f"{key:15s} {gname:5s}  {transport:9s} {dM:2d}  {results[key]['n_iter']:6d}  "
+    rank_rows.append((key, gname, transport, dM, RUN_DG[key].n_dir,
+                      results[key]["n_iter"], wall[key], errs, dJm, dFz))
+    print(f"{key:15s} {gname:5s}  {transport:9s} {dM:2d}  {RUN_DG[key].n_dir:5d}  "
+          f"{results[key]['n_iter']:6d}  "
           f"{wall[key]:8.2f}  {errs['J'][0] * 100:6.1f}% /{errs['J'][1] * 100:5.2f}%   "
           f"{errs['var'][0] * 100:6.1f}% /{errs['var'][1] * 100:5.2f}%   "
           f"{errs['F_plus_TOA'][0] * 100:6.1f}% /{errs['F_plus_TOA'][1] * 100:5.2f}%   "
           f"{dJm:+.4f}  {dFz:+.4f}")
 
 with open(os.path.join(OUT, "ranking.csv"), "w") as fh:
-    fh.write("run,grid,transport,delta_M,n_iter,wall_s,"
+    fh.write("run,grid,transport,delta_M,n_dir,n_iter,wall_s,"
              "J_err_max,J_err_mean,var_err_max,var_err_mean,"
              "Fplus_err_max,Fplus_err_mean,d_mean_J,d_mean_Fz_TOA\n")
-    for key, gn, t, dM, it, w, e, dJm, dFz in rank_rows:
-        fh.write(f"{key},{gn},{t},{dM},{it},{w:.3f},"
+    for key, gn, t, dM, nd, it, w, e, dJm, dFz in rank_rows:
+        fh.write(f"{key},{gn},{t},{dM},{nd},{it},{w:.3f},"
                  f"{e['J'][0]:.6f},{e['J'][1]:.6f},{e['var'][0]:.6f},{e['var'][1]:.6f},"
                  f"{e['F_plus_TOA'][0]:.6f},{e['F_plus_TOA'][1]:.6f},"
                  f"{dJm:.6f},{dFz:.6f}\n")
@@ -578,7 +621,7 @@ ypos = np.arange(len(keys_ord))[::-1]
 for off, name, col in ((-0.26, "J", "tab:blue"),
                        (0.0, "var", "tab:orange"),
                        (0.26, "F_plus_TOA", "tab:green")):
-    vals = [max(r[6][name][0], 1e-5) for r in rank_rows]
+    vals = [max(r[7][name][0], 1e-5) for r in rank_rows]
     ax.barh(ypos + off, vals, height=0.24, color=col,
             label=f"max rel. err {name}")
 ax.set_yticks(ypos)
@@ -595,9 +638,11 @@ plt.close(fig)
 fig, ax = plt.subplots(figsize=(6.4, 4.8))
 for ttl, keys, col in CONV_GROUPS:
     for kk, key in enumerate(keys):
-        ax.plot(mu_up[order], toa[key][0][order], "--", color=col,
-                lw=1.0 + 0.8 * kk, label=key)
-ax.plot(mu_up[order], toa[REF][0][order], "-k", lw=2.4, label=f"reference ({REF})")
+        mu_k, I_k = mu_spec(key)
+        ax.plot(mu_k, I_k, "--", color=col, lw=1.0 + 0.8 * kk, label=key)
+mu_r, I_r = mu_spec(REF)
+ax.plot(mu_r, I_r, "-k", lw=1.6, alpha=0.85,
+        label=f"reference ({REF}, {RUN_DG[REF].n_dir} ord.)")
 ax.set_xlabel(r"$\mu = \cos\vartheta$")
 ax.set_ylabel(r"domain-mean upward $I\,/F_0$ [sr$^{-1}$]")
 ax.set_title("TOA upward radiance: grid convergence toward the reference")

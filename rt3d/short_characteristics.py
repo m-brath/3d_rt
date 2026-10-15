@@ -62,6 +62,8 @@ multi-circuit contribution (documented trade-off).
 
 import numpy as np
 
+from rt3d.transport import _sweep_dirs
+
 
 def sc_stencil(omega, h):
     """
@@ -336,7 +338,7 @@ def sweep_direction_sc(grid, sc, kappa_e, S, bc, bottom_I=None, wrap_tol=1e-12,
 
 
 def sweep_all_sc(grid, direction_grid, kappa_e, S, bc, periodic_box=None,
-                 scs=None, wrap_tol=1e-12, max_passes=None):
+                 scs=None, wrap_tol=1e-12, max_passes=None, n_jobs=1):
     """
     SC transport over all ordinates (same signature/return convention as
     rt3d.transport.sweep_all).
@@ -348,6 +350,11 @@ def sweep_all_sc(grid, direction_grid, kappa_e, S, bc, periodic_box=None,
     scs : list of build_sc_chain dicts, optional
         Prebuilt per-ordinate precomputes to reuse across iterations;
         built here if None.
+    n_jobs : int, optional
+        Threads for the per-ordinate sweeps (P3), by default 1.  With
+        numba available (auto-detected) each SC sweep runs as a compiled
+        per-ordinate kernel (bit-identical to the NumPy recursion);
+        n_jobs > 1 runs those kernels on a thread pool.
 
     Returns
     -------
@@ -363,8 +370,17 @@ def sweep_all_sc(grid, direction_grid, kappa_e, S, bc, periodic_box=None,
             for d in range(direction_grid.n_dir)
         ]
     S_is_dir = np.ndim(S) == 2
-    for d, sc in enumerate(scs):
+    from rt3d.jit import HAVE_NUMBA, sc_sweep_jit
+
+    def one(d):
         s_d = S[:, d] if S_is_dir else S
-        I[:, d] = sweep_direction_sc(grid, sc, kappa_e, s_d, bc,
-                                     wrap_tol=wrap_tol, max_passes=max_passes)
+        if HAVE_NUMBA:
+            I[:, d] = sc_sweep_jit(grid, scs[d], kappa_e, s_d, bc,
+                                   wrap_tol=wrap_tol, max_passes=max_passes)
+        else:
+            I[:, d] = sweep_direction_sc(grid, scs[d], kappa_e, s_d, bc,
+                                         wrap_tol=wrap_tol,
+                                         max_passes=max_passes)
+
+    _sweep_dirs(one, direction_grid.n_dir, n_jobs)
     return I, scs

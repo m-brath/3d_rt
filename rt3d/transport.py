@@ -20,6 +20,23 @@ from rt3d.characteristics import build_chain, build_chain_octree
 from rt3d.geometry import march_lattice, ray_box_exit
 
 
+def _sweep_dirs(fn, n_dir, n_jobs):
+    """
+    Call fn(d) for d in range(n_dir); with n_jobs > 1 in parallel threads
+    (plan/optimization-plan.md P3).  The ordinates are independent; fn
+    must write disjoint outputs.  numpy releases the GIL for the large
+    elementwise/gather loops of the sweeps, so threads scale there.
+    """
+    if n_jobs is None or n_jobs <= 1 or n_dir <= 1:
+        for d in range(n_dir):
+            fn(d)
+        return
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(int(n_jobs), n_dir)) as ex:
+        list(ex.map(fn, range(n_dir)))
+
+
 class boundary_conditions(object):
     """
     Background intensities on the domain faces + optional ground (phase 5).
@@ -139,8 +156,11 @@ def sweep_direction(grid, chain, kappa_e, S, bc, bottom_I=None):
 
     roots = chain["roots"]
     parent = chain["parent"]
-    sub_cells = chain["sub_cells"]
+    rel = chain["rel"]
+    sub_delta = chain["sub_delta"]
+    periodic = chain["periodic"]
     sub_len = chain["sub_len"]
+    nx, ny, nxny = grid.nx, grid.ny, grid.nx * grid.ny
 
     # --- boundary-entry chains: accumulate from the entry point toward the
     # root center. root_steps is step-major from the center backwards, so
@@ -148,7 +168,8 @@ def sweep_direction(grid, chain, kappa_e, S, bc, bottom_I=None):
     # already visited (they lie between this segment and the center).
     tau_acc = np.zeros(roots.size)
     src_acc = np.zeros(roots.size)
-    for ridx, cell, ln in chain["root_steps"]:
+    rs_r, rs_c, rs_l = chain["root_steps"]
+    for ridx, cell, ln in zip(rs_r, rs_c, rs_l):
         tau = kappa_e[cell] * ln
         src_acc[ridx] += S[cell] * (-np.expm1(-tau)) * np.exp(-tau_acc[ridx])
         tau_acc[ridx] += tau
@@ -165,9 +186,20 @@ def sweep_direction(grid, chain, kappa_e, S, bc, bottom_I=None):
 
     # --- interior cells, BFS waves from the roots
     for wave in chain["waves"]:
+        if periodic:
+            wi0 = wave % nx
+            wj0 = (wave // nx) % ny
+            wk0 = wave // nxny
+        rows = []
         taus = []
         for m in range(sub_len.shape[0]):
-            cells_m = sub_cells[m][wave]
+            if periodic:
+                cells_m = ((wk0 + rel[m, 2]) * nxny
+                           + ((wj0 + rel[m, 1]) % ny) * nx
+                           + (wi0 + rel[m, 0]) % nx)
+            else:
+                cells_m = wave + sub_delta[m]
+            rows.append(cells_m)
             taus.append(kappa_e[cells_m] * sub_len[m])
         tau_tot = np.zeros(wave.size)
         for t in taus:
@@ -176,14 +208,15 @@ def sweep_direction(grid, chain, kappa_e, S, bc, bottom_I=None):
         prefix = np.zeros(wave.size)
         for m, tau in enumerate(taus):
             prefix += tau
-            cells_m = sub_cells[m][wave]
+            cells_m = rows[m]
             contrib += S[cells_m] * (-np.expm1(-tau)) * np.exp(-(tau_tot - prefix))
         I[wave] = I[parent[wave]] * np.exp(-tau_tot) + contrib
 
     return I
 
 
-def sweep_all(grid, direction_grid, kappa_e, S, bc, periodic_box=None, chains=None):
+def sweep_all(grid, direction_grid, kappa_e, S, bc, periodic_box=None,
+              chains=None, n_jobs=1):
     """
     Transport over all ordinates.
 
@@ -194,6 +227,14 @@ def sweep_all(grid, direction_grid, kappa_e, S, bc, periodic_box=None, chains=No
     chains : list of chain dicts, optional
         Prebuilt chains from build_chain (one per ordinate) to reuse across
         iterations; built here if None.
+    n_jobs : int, optional
+        Threads for the per-ordinate sweeps (P3), by default 1.  With
+        numba available (auto-detected) each sweep runs as a compiled
+        per-ordinate kernel (bit-identical to the NumPy recursion, and
+        faster even single-threaded); n_jobs > 1 runs those kernels on a
+        thread pool (njit releases the GIL; the NumPy gathers hold it,
+        so plain threads over the NumPy sweeps do not scale).  Without
+        numba the NumPy sweeps run, sequentially.
 
     Returns
     -------
@@ -208,9 +249,16 @@ def sweep_all(grid, direction_grid, kappa_e, S, bc, periodic_box=None, chains=No
             for d in range(direction_grid.n_dir)
         ]
     S_is_dir = np.ndim(S) == 2
-    for d, chain in enumerate(chains):
+    from rt3d.jit import HAVE_NUMBA, chain_sweep_jit
+
+    def one(d):
         s_d = S[:, d] if S_is_dir else S
-        I[:, d] = sweep_direction(grid, chain, kappa_e, s_d, bc)
+        if HAVE_NUMBA:
+            I[:, d] = chain_sweep_jit(grid, chains[d], kappa_e, s_d, bc)
+        else:
+            I[:, d] = sweep_direction(grid, chains[d], kappa_e, s_d, bc)
+
+    _sweep_dirs(one, direction_grid.n_dir, n_jobs)
     return I, chains
 
 
@@ -309,7 +357,7 @@ def sweep_direction_octree(oct, chain, kappa_e, S, bc):
     return I
 
 
-def precompute_octree_march(oct, omega, periodic_box=None):
+def precompute_octree_march(oct, omega, periodic_box=None, jit=None):
     """
     Exact characteristic march for one ordinate: march one ray backwards
     from every leaf center along -omega to the domain entry point.
@@ -327,6 +375,14 @@ def precompute_octree_march(oct, omega, periodic_box=None):
         Ordinate direction.  omega_z must be nonzero (the icosahedral
         grids have no ordinate on the equator).
     periodic_box : rt3d.geometry.cuboid, optional
+    jit : bool, optional
+        None (default) -> use the fused numba march+sweep (rt3d.jit) when
+        numba is available: the returned dict carries 'fused' = True and
+        only the per-ray geometry (budget, entry_cell); the segment arrays
+        below are NOT materialised and sweep_direction_octree_exact
+        re-marches each sweep in compiled parallel code
+        (plan/optimization-plan.md P1).  False -> reference NumPy march
+        with explicit segment arrays.
 
     Returns
     -------
@@ -340,6 +396,8 @@ def precompute_octree_march(oct, omega, periodic_box=None):
         'entry_cell' (n_leaf,) int or None, for omega_z > 0: bottom-face
                               leaf containing the ray's ground entry
                               point (for the Lambertian ground BC)
+        fused mode only: 'fused' True, 'budget' (n_leaf,) float,
+        'entry_cell', 'omega', 'periodic_box'
     """
     from rt3d.octree import march_octree
 
@@ -353,6 +411,29 @@ def precompute_octree_march(oct, omega, periodic_box=None):
         I_in = None  # filled from bc at sweep time
     else:
         budget = (z - z0) / omega[2]
+
+    if jit is None:
+        from rt3d.jit import jit_usable
+
+        jit = jit_usable(oct, periodic_box)
+    if jit:
+        entry_cell = None
+        if omega[2] > 0.0:
+            p = oct.centers - budget[:, None] * omega[None, :]
+            x0, x1 = oct.box[0]
+            y0, y1 = oct.box[1]
+            p[:, 0] = x0 + np.mod(p[:, 0] - x0, x1 - x0)
+            p[:, 1] = y0 + np.mod(p[:, 1] - y0, y1 - y0)
+            p[:, 2] = z0
+            entry_cell = oct.locate(p)
+        return {
+            "fused": True,
+            "omega": omega,
+            "budget": np.ascontiguousarray(budget),
+            "entry_cell": entry_cell,
+            "periodic_box": periodic_box,
+        }
+
     sr, sl, sLen = march_octree(oct.centers, -omega, oct, budget,
                                 periodic_box=periodic_box)
     # stable sort by ray keeps traversal order (center -> entry) per ray
@@ -405,6 +486,22 @@ def sweep_direction_octree_exact(oct, march, kappa_e, S, bc, bottom_I=None):
         bc.bottom_I: the Lambertian ground radiance evaluated at each
         ray's ground entry point via march['entry_cell'] (phase 5).
     """
+    if march.get("fused", False):
+        from rt3d.jit import sweep_direction_octree_exact_jit
+
+        if march["omega"][2] > 0.0 and bottom_I is not None:
+            # bottom_I is already the per-ray inflow (the caller indexes
+            # the ground radiance through march['entry_cell'] — same
+            # convention as the segment path below)
+            I_in = np.ascontiguousarray(bottom_I)
+        else:
+            I_in = np.full(oct.n_leaf,
+                           _entry_I_in(oct, march["omega"], bc))
+        return sweep_direction_octree_exact_jit(
+            oct, march["omega"], march["budget"], kappa_e, S, I_in,
+            periodic_box=march["periodic_box"],
+        )
+
     leaf = march["leaf"]
     tau_seg = kappa_e[leaf] * march["length"]
     pre_before, pre_thru = _block_prefixes(tau_seg, march["offsets"])
@@ -427,13 +524,17 @@ def sweep_direction_octree_exact(oct, march, kappa_e, S, bc, bottom_I=None):
 
 
 def sweep_all_octree_exact(oct, direction_grid, kappa_e, S, bc,
-                           periodic_box=None, marches=None):
+                           periodic_box=None, marches=None, n_jobs=1):
     """
     Transport over all ordinates on the octree along exact characteristics.
 
     S : (n_leaf,) or (n_leaf, N_dir) ndarray
     marches : list of precompute_octree_march dicts, optional (built
         once, reused across iterations).
+    n_jobs : int, optional
+        Threads for the per-ordinate sweeps (P3), by default 1.  With the
+        fused numba march the sweep is already parallel over rays, so
+        n_jobs > 1 mainly helps the reference NumPy marches.
     """
     I = np.zeros((oct.n_leaf, direction_grid.n_dir))
     if marches is None:
@@ -443,19 +544,24 @@ def sweep_all_octree_exact(oct, direction_grid, kappa_e, S, bc,
             for d in range(direction_grid.n_dir)
         ]
     S_is_dir = np.ndim(S) == 2
-    for d, march in enumerate(marches):
+
+    def one(d):
         s_d = S[:, d] if S_is_dir else S
-        I[:, d] = sweep_direction_octree_exact(oct, march, kappa_e, s_d, bc)
+        I[:, d] = sweep_direction_octree_exact(oct, marches[d], kappa_e, s_d, bc)
+
+    _sweep_dirs(one, direction_grid.n_dir, n_jobs)
     return I, marches
 
 
 def sweep_all_octree(oct, direction_grid, kappa_e, S, bc, periodic_box=None,
-                     chains=None):
+                     chains=None, n_jobs=1):
     """
     Transport over all ordinates on the octree.
 
     S : (n_leaf,) or (n_leaf, N_dir) ndarray
     chains : list of octree chain dicts, optional (built once, reused).
+    n_jobs : int, optional
+        Threads for the per-ordinate sweeps (P3), by default 1.
     """
     I = np.zeros((oct.n_leaf, direction_grid.n_dir))
     if chains is None:
@@ -465,14 +571,24 @@ def sweep_all_octree(oct, direction_grid, kappa_e, S, bc, periodic_box=None,
             for d in range(direction_grid.n_dir)
         ]
     S_is_dir = np.ndim(S) == 2
-    for d, chain in enumerate(chains):
+
+    def one(d):
         s_d = S[:, d] if S_is_dir else S
-        I[:, d] = sweep_direction_octree(oct, chain, kappa_e, s_d, bc)
+        I[:, d] = sweep_direction_octree(oct, chains[d], kappa_e, s_d, bc)
+
+    _sweep_dirs(one, direction_grid.n_dir, n_jobs)
     return I, chains
 
 
-def beam_optical_depth_octree(oct, omega_sun, kappa_e, periodic_box=None):
-    """Beam optical depth at every leaf center on the octree."""
+def beam_optical_depth_octree(oct, omega_sun, kappa_e, periodic_box=None,
+                              jit=None):
+    """
+    Beam optical depth at every leaf center on the octree.
+
+    jit : bool, optional
+        None (default) -> fused numba march when available (rt3d.jit),
+        False -> reference NumPy march.
+    """
     from rt3d.octree import march_octree
 
     omega_sun = np.asarray(omega_sun, dtype=float)
@@ -484,6 +600,16 @@ def beam_optical_depth_octree(oct, omega_sun, kappa_e, periodic_box=None):
         budget = (z1 - z) / (-omega_sun[2])
     else:
         budget, _, _ = ray_box_exit(oct.centers, -omega_sun, oct.box)
+    if jit is None:
+        from rt3d.jit import jit_usable
+
+        jit = jit_usable(oct, periodic_box)
+    if jit:
+        from rt3d.jit import beam_optical_depth_octree_jit
+
+        return beam_optical_depth_octree_jit(
+            oct, omega_sun, kappa_e, budget, periodic_box=periodic_box
+        )
     sr, sl, sLen = march_octree(oct.centers, -omega_sun, oct, budget,
                                 periodic_box)
     tau = np.zeros(oct.n_leaf)
