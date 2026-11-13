@@ -1,18 +1,62 @@
 # Plan — Monte Carlo solvers (forward two-stage + backward adjoint), with null collisions
 
-Status: **M0 implemented** (2026-10-24): `rt3d/mc/` package (`tracking.py`
-Woodcock core + unigrid/octree DDA walkers, `sources.py` HG inverse-CDF),
-`scripts/mc_phase0_check.py`, `tests/test_mc_tracking.py` (9) +
-`tests/test_mc_sources.py` (12). All M0 validations green: transmittance
-anchor |z| <= 1.3 sigma on both grids and both modes, cell-vs-global
-agreement within combined sigma, walker segments bit-identical to
-`march_lattice`/`march_octree`. Numba fast path arrives with M4 per the
-rt3d/jit.py pattern. M1-M5 not started. Adds a second solver family next
+Status: **M0 + M1 implemented** (M0: 2026-10-24, M1: 2026-11-13): `rt3d/mc/`
+package (`tracking.py` Woodcock core + unigrid/octree DDA walkers + analog
+history chains, `sources.py` HG inverse-CDF + birth/face/beam samplers,
+`estimators.py` track-length tallies, `forward.py` stage-1 `j_mc` both
+variants), shared case `rt3d/cases/slab_1d.py`,
+`scripts/mc_phase0_check.py`, `scripts/mc_forward_slab.py`,
+`tests/test_mc_tracking.py` (9) + `tests/test_mc_sources.py` (12) +
+`tests/test_mc_forward.py` (13). All M0 validations green. M1 slab
+validations green (J vs 1D-DO within 2 sigma + discretization allowance,
+variant agreement, Ng 14 vs 89 iterations at omega = 0.9, global closure
+|rel| ~ 1.3% — better than the SC-42 4.7%). Adds a second solver family next
 to the short-characteristics solver (`rt3d/`, phases 0-6 done). This plan
 reuses the octree (`rt3d/octree.py`), unigrid (`rt3d/geometry.py`),
 direction grid (`rt3d/directions.py`), ground BC
 (`rt3d/transport.ground_surface`), and the SC results of `lambda_iteration`
 as cross-validation reference.
+
+M1 implementation notes (how the code differs from the sketch above, all
+verified by `tests/test_mc_forward.py` and `scripts/mc_forward_slab.py`):
+
+- **Emission-rate convention**: the swept equation is
+  `Omega.grad I + kappa_e I = kappa_e * S`, so all MC birth rates must be
+  `kappa_e * S` (thermal: `kappa_a B`, already the rate).  Omitting the
+  `kappa_e` factor rescales the MC `Lambda` operator by `1/kappa_e`; for
+  `kappa_e < omega-less-than-1` domains the lambda iteration then diverges
+  (observed: `kappa_e = 0.5`, `omega = 0.8` blows up to `J ~ 1e66`).
+- **Track-length tally** (`estimators.py`): `J_c = sum_k w_k ell_{c,k} /
+  (4 pi V_c)`, `F_c = sum_k w_k ell_{c,k} Omega_k / V_c` (laid out
+  `(n_cells, 3)` like `rt3d.source.flux_vector`).  Error bars from batch
+  sums: `est = sum(sums)`, `sigma = sqrt(n_batches) * std(sums, ddof=1)`.
+- **Lambda-variant sampling defaults**: `crn=False`, `birth="source"`
+  (fresh photon set per iteration, births from `kappa_e S_n`).  Stable on
+  slabs, beams and the gaussian cloud, but the residual stalls at the tally
+  noise floor instead of `tol`.  `crn=True` (frozen stream + `birth="uniform"`)
+  converges cleanly and enables Ng **only for mild `kappa_e` variation**; on
+  the cloud the frozen uniform-birth operator has too few effective samples
+  per high-`kappa_e` cell and its spectral radius exceeds 1 — the iteration
+  diverges (diagnostic: `s_max_history`).
+- **Beam bookkeeping** (lambda variant): exactly **one** first-scatter child
+  per primary (collision pdf `kappa_e e^{-kappa_e s}` = the Beer-Lambert
+  attenuation); the primary is then done — deeper collision orders come from
+  the `omega * J` source update, mirroring how the SC solver re-scatters
+  `beam_scat` without ever multiplying it by `omega` twice.  The iterated
+  source `S` must **not** also carry the angle-averaged first-scatter source:
+  the bfs tally already *is* its transported J, adding both double-counts.
+  The explicit variant follows unsplit particle physics and reports the
+  unscattered beam track separately as `J_direct` (matches `F0 e^{-tau_b}/4pi`).
+- **Stage 1 has no direction grid / `n_refine`** — no angular quadrature in
+  MC stage 1; the icosahedral grid enters with stage-2 tally binning (M2).
+- **Anchor 4 for MC** is checked globally (net downward face flux vs
+  `4 pi kappa_a int J dV`): pointwise `div F` vs heating is truncation-
+  dominated at the topmost slab interfaces for *both* solver families
+  (MC ~ 12-18%, SC ~ 8% of peak heating), while the global closure is
+  ~1.1-1.3% for MC vs 4.7% for SC-42.
+- Ground BC (`bc.ground`) raises `NotImplementedError` in M1 (out of phase
+  scope); `kappa_max` modes, octree DDA and periodic wrap are exercised on
+  the cloud.
 
 Decisions taken with the user up front:
 

@@ -35,6 +35,7 @@ here is the reference NumPy path.
 import numpy as np
 
 from rt3d.geometry import ray_box_exit
+from rt3d.mc.sources import hg_scatter_directions
 from rt3d.octree import octree_grid
 
 
@@ -693,4 +694,240 @@ def sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s,
         "kappa_max": kmax_global if mode == "global" else None,
         "seed": int(seed),
         "n_histories": K,
+    }
+
+
+# =============================================================================
+# flight geometry helpers
+# =============================================================================
+
+
+def _path_cap(path_cap, grid):
+    """Default flight-length cap: 100 domain diagonals."""
+    if path_cap is not None:
+        return float(path_cap)
+    return 100.0 * float(np.sqrt(sum((b[1] - b[0]) ** 2 for b in grid.box)))
+
+
+def _exit_distance(p, d, grid, periodic_box=None):
+    """
+    Uncapped distance to the domain exit: with a periodic x/y box the exit is
+    a z face (``(z_face - p_z)/Omega_z``, ``inf`` for ``Omega_z = 0``),
+    otherwise the ordinary box exit.
+    """
+    p = np.atleast_2d(np.asarray(p, dtype=float))
+    d = np.atleast_2d(np.asarray(d, dtype=float))
+    if periodic_box is None:
+        t, _, _ = ray_box_exit(p, d, grid.box)
+        return t
+    z0, z1 = grid.box[2]
+    dz = d[:, 2]
+    t = np.full(p.shape[0], np.inf)
+    up = dz > 0.0
+    dn = dz < 0.0
+    t[up] = (z1 - p[up, 2]) / dz[up]
+    t[dn] = (z0 - p[dn, 2]) / dz[dn]
+    return t
+
+
+def flight_budget(p, d, grid, periodic_box=None, path_cap=None):
+    """
+    Path-length budget of a flight from `p` along `d`: the distance to the
+    domain exit, capped at `path_cap` (default 100 domain diagonals).
+
+    The cap truncates the near-grazing outliers (``|Omega_z|`` tiny) that
+    would otherwise make the marching loop spend an enormous number of empty
+    steps in vacuum; `track_histories` reports how often it fires.  The
+    result is always finite, as `sample_collisions` requires.
+    """
+    t = _exit_distance(p, d, grid, periodic_box=periodic_box)
+    return np.minimum(t, _path_cap(path_cap, grid))
+
+
+def flight_segments(starts, directions, ends, grid, periodic_box=None):
+    """
+    Segment records ``(history, cell, length)`` of straight flights truncated
+    at the path lengths `ends` — the geometric path the flight sampler walked.
+    """
+    if isinstance(grid, octree_grid):
+        return walk_octree(starts, directions, grid, ends,
+                           periodic_box=periodic_box)
+    sr, sc, sl, *_ = walk_lattice(starts, directions, grid, budgets=ends,
+                                  periodic_box=periodic_box)
+    return sr, sc, sl
+
+
+# =============================================================================
+# analog history chains — stage-1 transport of the explicit MC variant (M1)
+# =============================================================================
+
+
+def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
+                    weights=None, g=0.0, mode="cell", kappa_max=None,
+                    periodic_box=None, seed=0, scatter=True,
+                    max_collisions=20000, path_cap=None, tally_direct=None,
+                    is_direct=None):
+    """
+    Fly analog MC histories generation by generation with the M0 flight
+    sampler, tallying every flight's track lengths as they are produced and
+    resampling HG directions at real scattering events
+    (plan/mc-plan.md section 3, stage1="explicit").
+
+    The transport itself is `sample_collisions`, called once per generation on
+    the still-live sub-population: it already handles both majorant modes
+    (cell / global with **real null collisions**), the event decision
+    (scatter / true absorption / null) and the periodic-wrap snap, so the
+    chain adds only the generation loop, the HG resampling and the tally
+    deposition.  With ``scatter=False`` the scattering coefficient is replaced
+    by zero — every real collision removes the particle, which is the
+    fixed-source transport operator of the lambda-iteration variant.
+
+    Parameters
+    ----------
+    starts : (K, 3) ndarray
+        History start positions.
+    directions : (3,) or (K, 3) ndarray
+        History start directions.
+    grid : rt3d.geometry.unigrid or rt3d.octree.octree_grid
+    kappa_e, kappa_s : (n_cells,) ndarray
+    tally : rt3d.mc.estimators.track_tally or compatible
+        Receives ``add(history, cell, length, weight, direction)`` for every
+        flight segment (diffuse part of the radiation field).
+    weights : (K,) ndarray, optional
+        Power carried per history (plan section 5 weight conventions);
+        default 1.  Analog chains keep their weight — Russian roulette and
+        implicit capture are the M4 variance-reduction step.
+    g : float or (n_cells,) ndarray
+        HG asymmetry parameter for the scattering resampling.
+    mode, kappa_max, periodic_box, seed
+        As in `sample_collisions`.
+    scatter : bool
+        False -> removal-only transport (no particle scattering).
+    max_collisions : int
+        Cap on the number of generations (chains of a purely scattering
+        medium in a closed box can be long); histories still live at the cap
+        are reported in 'capped'.
+    path_cap : float, optional
+        Flight-length cap passed to `flight_budget`.
+    tally_direct : track_tally, optional
+        Second tally for the **unscattered direct-beam** part of the
+        histories.  Only meaningful together with `is_direct`.
+    is_direct : (K,) ndarray of bool, optional
+        Marks beam particles that have not scattered yet; their flights go to
+        `tally_direct` instead of `tally`, which reproduces the
+        direct/diffuse split of the SC solver (the direct beam is not part of
+        the diffuse ``J`` there).  A particle leaves the direct population at
+        its first scattering event.
+
+    Returns
+    -------
+    dict with keys
+        'n_collisions' : (K,) int   real collisions (scatter + absorption)
+        'n_null'       : (K,) int   null collisions consumed
+        'n_scatter'    : (K,) int   scattering events
+        'absorbed'     : (K,) bool  terminated by true absorption
+        'exited'       : (K,) bool  left the domain
+        'capped'       : (K,) bool  still live at max_collisions
+        'path'         : (K,) float total path length flown
+        'n_generations', 'mode', 'seed', 'scatter', 'n_truncated'
+    """
+    o = np.atleast_2d(np.asarray(starts, dtype=float))
+    K = o.shape[0]
+    d = np.asarray(directions, dtype=float)
+    if d.ndim == 1:
+        d = np.tile(d, (K, 1))
+    d = d / np.linalg.norm(d, axis=1)[:, None]
+
+    kappa_e = np.asarray(kappa_e, dtype=float)
+    kappa_s = np.asarray(kappa_s, dtype=float)
+    ks = kappa_s if scatter else np.zeros_like(kappa_s)
+
+    pos = o.copy()
+    if periodic_box is not None:
+        pos = periodic_box.wrap_xy(pos)
+
+    w = np.ones(K) if weights is None else np.asarray(weights, dtype=float)
+    direct = None if is_direct is None else np.asarray(is_direct, dtype=bool).copy()
+
+    live = np.arange(K)
+    n_coll = np.zeros(K, dtype=np.int64)
+    n_null = np.zeros(K, dtype=np.int64)
+    n_scat = np.zeros(K, dtype=np.int64)
+    path = np.zeros(K)
+    absorbed = np.zeros(K, dtype=bool)
+    exited = np.zeros(K, dtype=bool)
+    n_trunc = 0
+
+    rng = np.random.default_rng(seed)
+    gen = 0
+    while live.size and gen < int(max_collisions):
+        pl = pos[live]
+        dl = d[live]
+        raw = _exit_distance(pl, dl, grid, periodic_box=periodic_box)
+        budget = np.minimum(raw, _path_cap(path_cap, grid))
+        n_trunc += int(np.count_nonzero(raw > budget))
+
+        res = sample_collisions(pl, dl, budget, grid, kappa_e, ks, mode=mode,
+                                kappa_max=kappa_max, periodic_box=periodic_box,
+                                seed=seed + 1_000_003 * gen + 1)
+        seg_end = res["exit_t"]
+        path[live] += seg_end
+
+        # --- track lengths of this flight, deposited into the tallies
+        sh, sc, sl = flight_segments(pl, dl, seg_end, grid,
+                                     periodic_box=periodic_box)
+        if sh.size:
+            wseg = w[live[sh]]
+            dseg = dl[sh]
+            if direct is None or tally_direct is None:
+                tally.add(live[sh], sc, sl, wseg, dseg)
+            else:
+                dm = direct[live[sh]]
+                if np.any(~dm):
+                    tally.add(live[sh][~dm], sc[~dm], sl[~dm], wseg[~dm], dseg[~dm])
+                if np.any(dm):
+                    tally_direct.add(live[sh][dm], sc[dm], sl[dm], wseg[dm], dseg[dm])
+
+        # --- event bookkeeping
+        ev = res["coll_event"]
+        n_coll[live] += (ev != EV_EXIT).astype(np.int64)
+        n_null[live] += res["n_null"]
+
+        scat = ev == EV_SCATTER
+        exit_ev = ev == EV_EXIT
+        exited[live[exit_ev]] = True
+        absorbed[live[~scat & ~exit_ev]] = True
+
+        if not np.any(scat):
+            break   # every history in this generation was absorbed or exited
+
+        isl = live[scat]
+        coll_cell = res["coll_cell"][scat]
+        pos[isl] = pl[scat] + res["coll_distance"][scat, None] * dl[scat]
+        if periodic_box is not None:
+            pos[isl] = periodic_box.wrap_xy(pos[isl])
+        d[isl] = hg_scatter_directions(dl[scat], coll_cell, g, rng)
+        n_scat[isl] += 1
+        if direct is not None:
+            direct[isl] = False
+
+        live = isl
+        gen += 1
+
+    capped = np.zeros(K, dtype=bool)
+    capped[live] = True
+
+    return {
+        "n_collisions": n_coll,
+        "n_null": n_null,
+        "n_scatter": n_scat,
+        "absorbed": absorbed,
+        "exited": exited,
+        "capped": capped,
+        "path": path,
+        "n_generations": gen,
+        "n_truncated": n_trunc,
+        "mode": mode,
+        "seed": int(seed),
+        "scatter": bool(scatter),
     }
