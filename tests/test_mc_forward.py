@@ -21,6 +21,17 @@ MC phase M1 anchors (plan/mc-plan.md section 7): stage-1 mean intensity
   7. octree + global majorant mode run on the gaussian cloud and agree
      with each other statistically
   8. traceability fields + unimplemented-feature guards
+
+MC phase M2 anchors (plan/mc-plan.md section 7): stage-2 radiance
+``I(cell, ordinate)`` of a fixed source on the SC ray set:
+
+  9.  deterministic estimator == analytic line integral on the uniform slab,
+      and **bit-identical** to the converged SC ``I`` on the octree when fed
+      the SC's own source (same recursion, same exact marches)
+  10. next-flight estimator: aggregate z-scores against the deterministic
+      reference (mean ~ 0, rms ~ 1, 2-sigma coverage), sigma ~ 1/sqrt(n),
+      cell and global majorant mode equivalent
+  11. stage-2 guards: estimator name, Lambertian ground, traceability keys
 """
 
 import numpy as np
@@ -30,7 +41,7 @@ from rt3d.cases.gaussian_cloud import gaussian_cloud
 from rt3d.cases.slab_1d import d1o_J, slab_grid
 from rt3d.directions import icosahedric_grid
 from rt3d.geometry import cuboid, unigrid
-from rt3d.mc.forward import j_mc
+from rt3d.mc.forward import j_mc, radiance_from_source, stage2_source
 from rt3d.octree import octree_grid
 from rt3d.solver import lambda_iteration
 from rt3d.transport import beam_optical_depth, boundary_conditions

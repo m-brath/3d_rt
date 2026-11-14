@@ -57,10 +57,13 @@ from rt3d.mc.sources import (
     sample_births,
 )
 from rt3d.mc.tracking import (
+    EV_EXIT,
+    _exit_distance,
     flight_budget,
     flight_segments,
     sample_collisions,
     track_histories,
+    walk_lattice,
 )
 from rt3d.source import single_scattering_albedo
 
@@ -672,3 +675,250 @@ def _beam_j_analytic(grid, omega_sun, kappa_e, F0, periodic_box=None):
         else beam_optical_depth(grid, omega_sun, kappa_e, periodic_box=periodic_box)
     )
     return float(F0) * np.exp(-tau_b) / (4.0 * np.pi)
+
+
+# =============================================================================
+# Solver A, stage 2 — radiance from a fixed source (plan/mc-plan.md section 3,
+# phase M2)
+# =============================================================================
+
+
+def stage2_source(grid, dg, kappa_e, kappa_s, B, J, g=0.0, beam=None,
+                  periodic_box=None):
+    """
+    Assemble the stage-2 fixed source in the solver convention,
+
+        S_total = (1 - omega) * B + omega * J  [+ beam first scatter]
+
+    reusing the SC bookkeeping.  Returns the scalar form ``(n_cells,)`` when
+    there is no beam and the direction-resolved form ``(n_cells, N_dir)``
+    when there is one — the beam first-scatter source
+    ``omega * Phi_HG(->omega_sun) F0 exp(-tau_b)`` of
+    `rt3d.source.beam_scattering_source` is strongly anisotropic, so stage-2
+    radiance comparisons against `rt3d.solver.lambda_iteration` need the
+    per-ordinate values (not just its angle average, which is what stage 1
+    uses via the bfs particle stream).
+    """
+    from rt3d.octree import octree_grid
+    from rt3d.source import beam_scattering_source
+    from rt3d.transport import beam_optical_depth, beam_optical_depth_octree
+
+    omega = single_scattering_albedo(kappa_e, kappa_s)
+    S = (1.0 - omega) * B + omega * J
+    if beam is None:
+        return S
+    if isinstance(grid, octree_grid):
+        tau_b = beam_optical_depth_octree(
+            grid, beam["omega_sun"], kappa_e, periodic_box=periodic_box
+        )
+    else:
+        tau_b = beam_optical_depth(
+            grid, beam["omega_sun"], kappa_e, periodic_box=periodic_box
+        )
+    g_cells = None if np.ndim(g) == 0 else np.asarray(g, dtype=float)
+    beam_scat = beam_scattering_source(
+        dg, beam["omega_sun"], beam["F0"], tau_b, omega,
+        g if g_cells is None else 0.0, g_cells=g_cells,
+    )
+    return S[:, None] + beam_scat
+
+
+def radiance_from_source(
+    grid,
+    dg,
+    kappa_e,
+    S_total,
+    bc,
+    periodic_box=None,
+    estimator="next_flight",
+    n_histories=25,
+    n_batches=10,
+    seed=0,
+    mode="cell",
+    kappa_max=None,
+):
+    """
+    MC stage 2 — the radiance field ``I(cell, ordinate)`` of a **fixed**
+    source, on a ray set identical to the SC sweeps: one ray per cell/leaf
+    center per icosahedral ordinate, marched **backwards** from the center to
+    the domain entry face (exactly `precompute_octree_march` on the octree,
+    the `walk_lattice` DDA on the unigrid), with the boundary inflow applied
+    at the face the backward march exits (the `boundary_conditions.inflow`
+    convention of the SC sweeps).
+
+    For a target point P at path length ``s_P`` from the entry,
+
+        I(P) = I_in exp(-tau(0, s_P)) + int_0^{s_P} kappa_e S e^{-tau(s, s_P)} ds
+
+    - ``estimator="next_flight"`` (default): for every ray, ``n_histories``
+      backward flights are sampled with the M0 Woodcore tracker (``mode``
+      "cell"/"global"); each flight scores the source **intensity**
+      ``S_total(cell, d)`` at the point of its first *real* collision
+      (nulls continue; flights exiting without a collision score 0).  The
+      real-collision density ``kappa_e e^{-tau}`` times the source intensity
+      reproduces the line integral exactly — the estimator is unbiased in
+      both majorant modes with no ``/kappa_max`` factor (deviation from the
+      plan sketch, logged).  Error bars: the flights of one ray form
+      ``n_batches`` history batches; ``sigma_I`` is the batch-sums standard
+      error of the ray mean.
+    - ``estimator="deterministic"``: the same line integral evaluated
+      exactly per march segment with ``S (1 - exp(-tau_seg)) exp(-tau_before)``
+      weights — the zero-noise limit of the tally and the same recursion the
+      SC octree sweep runs (so on the octree this is the SC intensity to
+      floating-point round-off).
+
+    Parameters
+    ----------
+    grid : rt3d.geometry.unigrid or rt3d.octree.octree_grid
+    dg : rt3d.directions.direction_grid
+        Ordinate set the radiance is tallied on (tally binning only; MC
+        collision sampling itself stays continuous in angle).
+    kappa_e : (n_cells,) ndarray
+    S_total : (n_cells,) or (n_cells, N_dir) ndarray
+        Fixed source function (intensity units), e.g. `stage2_source`.
+    bc : rt3d.transport.boundary_conditions
+        Face inflows; a Lambertian `ground` raises NotImplementedError (M2
+        scope — the self-coupled surface needs the SC phase-5 machinery).
+    periodic_box : rt3d.geometry.cuboid, optional
+    estimator : {"next_flight", "deterministic"}
+    n_histories : int
+        Flights per ray (per cell and ordinate) of the next-flight tally.
+    n_batches : int
+        History batches for sigma_I.
+    seed : int
+        Base PCG64 seed (stream offset per ordinate), recorded in the output.
+    mode, kappa_max : str, float
+        Woodcock majorant mode of the tracker.
+
+    Returns
+    -------
+    dict with keys
+        'I'       (n_cells, N_dir) intensities at cell centers
+        'sigma_I' (n_cells, N_dir) 1-sigma standard errors (zeros for the
+                  deterministic estimator)
+        'J'       (n_cells,) quadrature mean intensity of the tally
+        'estimator', 'mode', 'kappa_max', 'seed', 'n_refine', 'n_dir',
+        'n_histories', 'n_batches', 'n_null'   traceability / diagnostics
+    """
+    from rt3d.geometry import ray_box_exit
+    from rt3d.octree import octree_grid
+    from rt3d.transport import _block_prefixes, precompute_octree_march
+
+    if estimator not in ("next_flight", "deterministic"):
+        raise ValueError(
+            f"estimator must be 'next_flight' or 'deterministic', got {estimator!r}"
+        )
+    if getattr(bc, "ground", None) is not None:
+        raise NotImplementedError(
+            "MC stage 2 implements the face inflows of boundary_conditions; "
+            "the self-coupled Lambertian ground is not part of M2 "
+            "(plan/mc-plan.md)"
+        )
+
+    is_octree = isinstance(grid, octree_grid)
+    nc = n_cells_of(grid)
+    kappa_e = np.asarray(kappa_e, dtype=float)
+    if kappa_e.shape != (nc,):
+        raise ValueError(f"kappa_e must have shape ({nc},)")
+    S_is_dir = np.ndim(S_total) == 2
+    S_total = np.asarray(S_total, dtype=float)
+    if S_total.shape != ((nc, dg.n_dir) if S_is_dir else (nc,)):
+        raise ValueError("S_total must have shape (n_cells,) or (n_cells, N_dir)")
+
+    n_h = int(n_histories) if estimator == "next_flight" else 0
+    nb = max(1, min(int(n_batches), n_h)) if n_h else 1
+
+    centers = grid.centers
+    I = np.zeros((nc, dg.n_dir))
+    sI = np.zeros((nc, dg.n_dir))
+    n_null_total = 0
+
+    for d in range(dg.n_dir):
+        om = np.asarray(dg.directions[d], dtype=float)
+        u = -om
+        s_d = S_total[:, d] if S_is_dir else S_total
+
+        # ---- backward march geometry for every center + uncollided data
+        if is_octree:
+            march = precompute_octree_march(grid, om,
+                                            periodic_box=periodic_box, jit=False)
+            seg_cell = march["leaf"]
+            seg_len = march["length"]
+            offsets = march["offsets"]
+            ray_of = march["ray_of"]
+            budget = np.zeros(nc)
+            np.add.at(budget, ray_of, seg_len)
+            I_in = np.full(nc, bc.top_I if om[2] < 0.0 else bc.bottom_I)
+        else:
+            if periodic_box is None:
+                budget, ex_ax, ex_side = ray_box_exit(centers, u, grid.box)
+                I_in = bc.inflow(ex_ax, ex_side)
+            else:
+                budget = _exit_distance(centers, np.tile(u, (nc, 1)), grid,
+                                        periodic_box=periodic_box)
+                I_in = np.full(nc, bc.top_I if om[2] < 0.0 else bc.bottom_I)
+            # segment records of the backward march: needed for the exact
+            # uncollided attenuation on the inhomogeneous lattice in **both**
+            # estimators (and for the deterministic source integral)
+            seg_ray, seg_cell, seg_len, *_ = walk_lattice(
+                centers, u, grid, budgets=budget, periodic_box=periodic_box
+            )
+            order = np.argsort(seg_ray, kind="stable")
+            seg_ray, seg_cell, seg_len = seg_ray[order], seg_cell[order], seg_len[order]
+            ends = np.append(np.flatnonzero(np.diff(seg_ray)), seg_ray.size - 1)
+            offsets = np.append(np.append(0, ends[:-1] + 1), seg_ray.size)
+            ray_of = np.repeat(np.arange(nc), np.diff(offsets))
+
+        # ---- per-segment attenuation (both estimators need the uncollided term)
+        tau_seg = kappa_e[seg_cell] * seg_len
+        pre_before, _ = _block_prefixes(tau_seg, offsets)
+        tau_tot = np.zeros(nc)
+        np.add.at(tau_tot, ray_of, tau_seg)
+        uncollided = I_in * np.exp(-tau_tot)
+
+        if estimator == "deterministic":
+            src = np.zeros(nc)
+            np.add.at(src, ray_of,
+                      s_d[seg_cell] * (-np.expm1(-tau_seg)) * np.exp(-pre_before))
+            I[:, d] = uncollided + src
+            continue
+
+        # ---- next-flight tally: n_h backward flights per ray
+        K = nc * n_h
+        starts = np.repeat(centers, n_h, axis=0)
+        buds = np.repeat(budget, n_h)
+        res = sample_collisions(starts, np.tile(u, (K, 1)), buds, grid, kappa_e,
+                                kappa_e, mode=mode, kappa_max=kappa_max,
+                                periodic_box=periodic_box, seed=seed + 1 + d)
+        real = res["coll_event"] != EV_EXIT
+        dep = np.zeros(K)
+        dep[real] = s_d[res["coll_cell"][real]]
+        n_null_total += int(np.sum(res["n_null"]))
+
+        # history batches per ray: flight f of ray c sits in batch of f
+        edges = np.round(np.linspace(0, n_h, nb + 1)).astype(np.int64)
+        batch_of_f = np.repeat(np.arange(nb), np.diff(edges))
+        ray_idx = np.repeat(np.arange(nc), n_h)
+        flat = batch_of_f[np.arange(K) % n_h] * nc + ray_idx
+        sums = np.bincount(flat, weights=dep, minlength=nb * nc).reshape(nb, nc)
+        est = sums.sum(axis=0)
+        se = (np.sqrt(nb) * sums.std(axis=0, ddof=1) / n_h if nb > 1
+              else np.zeros(nc))
+        I[:, d] = uncollided + est / n_h
+        sI[:, d] = se
+
+    Jq = I @ dg.weights / (4.0 * np.pi)
+    return {
+        "I": I,
+        "sigma_I": sI,
+        "J": Jq,
+        "estimator": estimator,
+        "mode": mode,
+        "kappa_max": kappa_max,
+        "seed": int(seed),
+        "n_refine": getattr(dg, "n_refine", None),
+        "n_dir": int(dg.n_dir),
+        "n_histories": n_h,
+        "n_batches": nb,
+        "n_null": n_null_total,
+    }

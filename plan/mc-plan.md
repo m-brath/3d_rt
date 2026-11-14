@@ -1,13 +1,16 @@
 # Plan — Monte Carlo solvers (forward two-stage + backward adjoint), with null collisions
 
-Status: **M0 + M1 implemented** (M0: 2026-10-24, M1: 2026-11-13): `rt3d/mc/`
+Status: **M0 + M1 + M2 implemented** (M0: 2026-10-24, M1: 2026-11-13, M2:
+2026-11-14): `rt3d/mc/`
 package (`tracking.py` Woodcock core + unigrid/octree DDA walkers + analog
 history chains, `sources.py` HG inverse-CDF + birth/face/beam samplers,
 `estimators.py` track-length tallies, `forward.py` stage-1 `j_mc` both
-variants), shared case `rt3d/cases/slab_1d.py`,
+variants + stage-2 `radiance_from_source` / `stage2_source`), shared case
+`rt3d/cases/slab_1d.py`,
 `scripts/mc_phase0_check.py`, `scripts/mc_forward_slab.py`,
+`scripts/mc_forward_cloud.py`,
 `tests/test_mc_tracking.py` (9) + `tests/test_mc_sources.py` (12) +
-`tests/test_mc_forward.py` (13). All M0 validations green. M1 slab
+`tests/test_mc_forward.py` (13) + `tests/test_mc_radiance.py` (5). All M0 validations green. M1 slab
 validations green (J vs 1D-DO within 2 sigma + discretization allowance,
 variant agreement, Ng 14 vs 89 iterations at omega = 0.9, global closure
 |rel| ~ 1.3% — better than the SC-42 4.7%). Adds a second solver family next
@@ -57,6 +60,35 @@ verified by `tests/test_mc_forward.py` and `scripts/mc_forward_slab.py`):
 - Ground BC (`bc.ground`) raises `NotImplementedError` in M1 (out of phase
   scope); `kappa_max` modes, octree DDA and periodic wrap are exercised on
   the cloud.
+
+M2 implementation notes (stage-2 radiance, `radiance_from_source` +
+`stage2_source` in `forward.py`, verified by `tests/test_mc_radiance.py` and
+`scripts/mc_forward_cloud.py`):
+
+- **Estimator deviation from the sketch**: the next-flight tally scores
+  `S(cell, d)` at the first *real* collision with **no `/kappa_max`
+  division** — the real-collision density `kappa_e e^{-tau}` already
+  reproduces `int kappa_e S e^{-tau} ds` exactly in both majorant modes
+  (nulls are a tracker detail, not an estimator factor).
+- **Deterministic == SC on the octree, bit for bit**: the `S (1 -
+  e^{-tau_seg}) e^{-tau_before}` segment recursion is identical to
+  `sweep_direction_octree_exact`, so feeding the SC's converged source
+  reproduces `lambda_iteration`'s `I` (and quadrature `J`) at 0.0 rel err —
+  provided the feed is faithful: `ng=None` (the Ng-accelerated `S` is not
+  the source that produced `I`) and the **direction-resolved** `S` passed
+  per ordinate (with per-cell g the `(n_cells, N_dir)` columns differ;
+  collapsing to one column costs ~12% on the cloud).
+  On the unigrid the SC `chain`/`sc` sweeps are different path stencils;
+  there the deterministic estimator is validated against the closed-form
+  Beer-Lambert integral instead.
+- **Statistics criterion**: aggregate z-scores (mean ~ 0, rms ~ 1, coverage)
+  on sigma-resolved cells, not raw pointwise 2-sigma bands — the binary
+  tally's batch sigma collapses to 0 in optically thick cells and is ~10–20%
+  low at 10 batches (see decisions log; measured rms z = 1.04–1.07,
+  sigma ~ 1/sqrt(n_hist)).
+- Uncollided boundary term from the exact backward-march `tau_tot` with the
+  inflow of the face the march exits (`bc.inflow` / `_entry_I_in`
+  convention); Lambertian ground raises `NotImplementedError`.
 
 Decisions taken with the user up front:
 

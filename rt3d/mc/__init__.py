@@ -24,7 +24,7 @@ stage-1 mean-intensity solvers.
 """
 
 from rt3d.mc.estimators import cell_volumes, heating_rate, n_cells_of, track_tally
-from rt3d.mc.forward import j_mc
+from rt3d.mc.forward import j_mc, radiance_from_source, stage2_source
 from rt3d.mc.sources import (
     beam_seed,
     face_area,
