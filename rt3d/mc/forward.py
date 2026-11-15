@@ -252,6 +252,9 @@ def j_mc(
     max_collisions=20000,
     path_cap=None,
     tally_flux=True,
+    implicit_capture=False,
+    roulette_floor=None,
+    jit=False,
 ):
     """
     MC stage 1: mean intensity ``J`` (and flux ``F``) of the diffuse field.
@@ -325,6 +328,15 @@ def j_mc(
         loop against near-grazing outliers; 'n_truncated' counts the cap hits.
     tally_flux : bool
         Also tally the flux vector ``F`` (validation anchor 4).
+    implicit_capture, roulette_floor : M4 variance reduction
+        See `rt3d.mc.tracking.track_histories` — albedo-weight chains (no
+        absorption termination) and a Russian-roulette weight floor.  Only
+        the ``explicit`` variant uses the chains; the lambda variant's
+        single-flight populations are removal-only and unaffected.
+    jit : bool
+        Route the flight sampling through the numba fast path
+        (`rt3d.mc.jitmc`) when usable — statistically equivalent, different
+        random stream.
 
     Returns
     -------
@@ -602,7 +614,9 @@ def j_mc(
                          weights=weights, g=g, tally_direct=tally_dir,
                          is_direct=direct, max_collisions=max_collisions,
                          periodic_box=periodic_box, mode=mode,
-                         kappa_max=kappa_max, path_cap=path_cap, seed=seed)
+                         kappa_max=kappa_max, path_cap=path_cap, seed=seed,
+                         implicit_capture=implicit_capture,
+                         roulette_floor=roulette_floor, jit=jit)
 
     res_tot = tally.result(vol)
     out = _common_output(res_tot, kappa_a, B)
@@ -636,6 +650,9 @@ def j_mc(
         "n_truncated": int(tr["n_truncated"]),
         "capped": int(np.count_nonzero(tr["capped"])),
         "n_collisions": int(np.sum(tr["n_collisions"])),
+        "implicit_capture": bool(implicit_capture),
+        "roulette_floor": roulette_floor,
+        "jit": bool(jit),
         "J_direct": Jd,
         "sigma_J_direct": sJd,
         "J_fixed": None,

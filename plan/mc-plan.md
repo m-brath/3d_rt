@@ -1,8 +1,8 @@
 # Plan — Monte Carlo solvers (forward two-stage + backward adjoint), with null collisions
 
-Status: **M0 + M1 + M2 + M3 implemented** (M0: 2026-10-24, M1: 2026-11-13,
+Status: **M0 + M1 + M2 + M3 + M4 implemented** (M0: 2026-10-24, M1: 2026-11-13,
 M2: 2026-11-14, M3:
-2026-11-15): `rt3d/mc/`
+2026-11-15, M4: 2026-11-15): `rt3d/mc/`
 package (`tracking.py` Woodcock core + unigrid/octree DDA walkers + analog
 history chains, `sources.py` HG inverse-CDF + birth/face/beam samplers,
 `estimators.py` track-length tallies, `forward.py` stage-1 `j_mc` both
@@ -11,9 +11,11 @@ adjoint `backward_detector_mc` / `backward_all_sky`), shared case
 `rt3d/cases/slab_1d.py`,
 `scripts/mc_phase0_check.py`, `scripts/mc_forward_slab.py`,
 `scripts/mc_forward_cloud.py`, `scripts/mc_backward.py`,
+`scripts/mc_phase4_walltimes.py`,
 `tests/test_mc_tracking.py` (9) + `tests/test_mc_sources.py` (12) +
 `tests/test_mc_forward.py` (13) + `tests/test_mc_radiance.py` (5) +
-`tests/test_mc_backward.py` (8). All M0 validations green. M1 slab
+`tests/test_mc_backward.py` (8) + `tests/test_mc_vr.py` (5) +
+`tests/test_mc_jit.py` (5). All M0 validations green. M1 slab
 validations green (J vs 1D-DO within 2 sigma + discretization allowance,
 variant agreement, Ng 14 vs 89 iterations at omega = 0.9, global closure
 |rel| ~ 1.3% — better than the SC-42 4.7%). M3 adjoint validations green
@@ -132,6 +134,61 @@ validated by `tests/test_mc_backward.py` and `scripts/mc_backward.py`):
   cost — one all-sky image costs `N_up x n_seeds` walks instead of
   `n_leaf x N_dir x n_h` forward rays (17 000x fewer rays on the cloud) —
   and the absence of the whole stage-1 iteration.
+
+M4 implementation notes (variance reduction + numba fast path):
+
+- **Variance reduction** (`implicit_capture` / `roulette_floor` on
+  `track_histories`, `j_mc` explicit variant, `backward_detector_mc` and
+  `backward_all_sky`): implicit capture keeps every history alive at a real
+  collision and folds absorption into the history weight through the
+  collision albedo `omega = kappa_s / kappa_e` (`w *= omega`, zero weights
+  killed); Russian roulette doubles `w` with probability 1/2 below the
+  weight floor.  The expected weight reaching path length `s` is
+  `exp(-tau_a(s))`, so the removal series is reproduced exactly with the
+  score spread over many small weights instead of 0/1 terminations.
+  Measured on the slab (backward walk, 100k seeds): standard error drops
+  ~3x at `omega = 0.5` and ~1.8x at `omega = 0.9`, both matching the analog
+  value inside the combined 2 sigma.  In the **forward** explicit chains the
+  VR switches are variance-**neutral** (sigma ratio 1.00): stage-1 J noise is
+  dominated by birth statistics and the chains are short, so spreading the
+  absorption score buys nothing there — reported rather than hidden.
+  At `omega = 0` the switches degenerate **bit-for-bit** to the analog walk
+  (locked by a test).  Keys `implicit_capture` / `roulette_floor` recorded in
+  every chain and detector output.
+- **numba fast path** (`rt3d/mc/jitmc.py`): scalar per-photon clone of
+  `sample_collisions` for **both** grids (unigrid lattice DDA with the
+  reference snap formulas, octree leaf DDA with periodic image centers), the
+  Woodcock flight + event decision, the phase-5 periodic face snap and the
+  path-budget bookkeeping.  Same degradation pattern as `rt3d/jit.py`
+  (`HAVE_NUMBA` gate, `jit_mc_usable()`, silent NumPy fallback — locked by
+  tests).  Selected via `jit=True` on `sample_collisions`, `track_histories`,
+  `j_mc`, `backward_detector_mc`, `backward_all_sky`.
+  Kernels use numba's own seeded generator (`np.random.seed` inside), so the
+  stream is **not** the NumPy PCG64 stream: equivalence is statistical, not
+  per-ray — collision/event/exit fractions and mean exit paths agree within
+  4 sigma on unigrid + octree, cell + global, and the plan's transmittance
+  anchor (anchor 3) holds **on the jit path** (4 sigma).  A walker invariant
+  that the reference enforces and the kernels must match: the position stays
+  exactly on a crossed face and the eps-step along `d` is a *locate probe
+  only* — advancing the position by the probe truncates backward exit
+  distances (measured 3106 spurious truncations before the fix).
+  Warm speedup on 30k flights: unigrid cell 10 ms vs 65 ms, global 7 ms vs
+  47 ms; octree cell 35 ms vs 158 ms, global 47 ms vs 327 ms (4.5-7x);
+  first call pays ~1.4 s of compilation.
+- **Wall-time table** (`scripts/mc_phase4_walltimes.py`, cloud octree 8576
+  leaves, DG-42): sampler warm speedups 6.2-6.9x unigrid, 4.9-6.4x octree.
+  Query A (stage-1 J, whole domain): SC lambda 15.1 s numpy / 5.7 s jit,
+  deterministic; MC explicit 4.3 s numpy / 2.4 s jit but is a single noisy
+  sample (5% rms sigma_J) and the *closed* MC route (j_mc lambda) costs
+  349 s — SC wins the closed J field, plan expectation confirmed.
+  Query B (all-sky image, 21 nodes, 20k seeds each): adjoint 6.3 s numpy /
+  1.2 s jit / 2.3 s jit+VR, 21/21 inside the M3 band, flux closure
+  −0.2…−1.4% vs SC-42 — vs 15.1 s for SC which additionally must solve the
+  whole domain.  Query C (single detector): 1.21 / 0.27 / 0.88 s; implicit
+  capture halves sigma (1.36% -> 0.57%) at ~2x collisions.  Honest caveat:
+  on the all-sky **image** (B) VR costs ~1.9x wall at equal seeds with
+  unchanged mean relative sigma — the gain is signal-dependent (strong
+  pixels yes, near-zero sky pixels no), so VR stays opt-in, not default.
 
 Decisions taken with the user up front:
 
@@ -346,7 +403,7 @@ No new dependencies (numba, numpy, pytest already in `pyarts`).
 | M1 | Stage 1 `J` both variants | 1D slab `tau=5`, `g=0`, `omega` in {0.5, 0.9}: `J(z)` vs phase2 Chandrasekhar/two-stream reference within 2 sigma; explicit vs lambda variant agree within 2 sigma; heating rate `4 pi kappa_a (B - J)` vs `div F` of the SC reference (anchor 4) |
 | M2 | Stage 2 radiance on the gaussian cloud | `I(cell, ordinate)` vs converged `lambda_iteration` within 2 sigma per cell (aggregate); measured error bars vs observed deviations (~1/sqrt(N)); deterministic-reference estimator agrees with SC sweep structurally |
 | M3 | Backward MC | top-face all-sky vs Solver A Stage 2 within 2 sigma per cone bin; beam coupling check: `kappa_a = 0` single-scatter regime vs analytic single-scatter beam source |
-| M4 | performance + variance reduction | numba fast path (jit.py pattern, numpy fallback tested); implicit capture + Russian roulette; wall-time MC vs SC table (the MC family is expected to win on Stage-2/backward-style queries, SC on J — reported honestly) |
+| M4 | performance + variance reduction | **done 2026-11-15** — `rt3d/mc/jitmc.py` numba fast path (jit.py pattern, numpy fallback tested); `implicit_capture` + `roulette_floor` on chains, `j_mc` explicit variant and the adjoint walk; wall-time MC vs SC table in `scripts/mc_phase4_walltimes.py` (the MC family wins Stage-2/backward-style queries, SC on J — reported honestly) |
 | M5 | integration pass | `mc_compare.py` report in `plot/`, energy-balance closure over the full MC chain (A1 -> A2 -> B), decisions logged in plan/plan.md |
 
 Every phase uses `direction_grid(n_refine)` with the development grid `n_refine=1`

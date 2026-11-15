@@ -442,7 +442,8 @@ def walk_octree(starts, directions, oct, budgets, periodic_box=None):
 
 
 def sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s,
-                      mode="cell", kappa_max=None, periodic_box=None, seed=0):
+                      mode="cell", kappa_max=None, periodic_box=None, seed=0,
+                      jit=False):
     """
     Sample the first **real** collision (scatter or true absorption) of
     `K` photons flying Woodcock null-collision flights through the grid.
@@ -463,6 +464,12 @@ def sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s,
     this primitive — it returns the first real event per photon, which is
     everything the M0 anchors (transmittance, cell-vs-global equivalence)
     need; the stage-1 solvers (M1) loop over it.
+
+    ``jit=True`` routes to the numba per-photon kernel
+    (`rt3d.mc.jitmc.sample_collisions_jit`) when usable — same physics and
+    return dict, numba's own random stream (statistically equivalent,
+    plan M4); silently falls back to the NumPy path when numba is
+    unavailable.
 
     Parameters
     ----------
@@ -508,6 +515,15 @@ def sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s,
             True where the photon exited without a real collision — the
             transmittance tally of anchor 3.
     """
+    if jit:
+        from rt3d.mc import jitmc
+
+        if jitmc.jit_mc_usable(grid, periodic_box):
+            return jitmc.sample_collisions_jit(
+                starts, directions, budgets, grid, kappa_e, kappa_s,
+                mode=mode, kappa_max=kappa_max, periodic_box=periodic_box,
+                seed=seed)
+
     if mode not in ("cell", "global"):
         raise ValueError(f"mode must be 'cell' or 'global', got {mode!r}")
     octree = isinstance(grid, octree_grid)
@@ -766,7 +782,8 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
                     weights=None, g=0.0, mode="cell", kappa_max=None,
                     periodic_box=None, seed=0, scatter=True,
                     max_collisions=20000, path_cap=None, tally_direct=None,
-                    is_direct=None):
+                    is_direct=None, implicit_capture=False,
+                    roulette_floor=None, jit=False):
     """
     Fly analog MC histories generation by generation with the M0 flight
     sampler, tallying every flight's track lengths as they are produced and
@@ -781,6 +798,28 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
     deposition.  With ``scatter=False`` the scattering coefficient is replaced
     by zero — every real collision removes the particle, which is the
     fixed-source transport operator of the lambda-iteration variant.
+
+    Variance reduction (M4, plan section 2):
+
+    ``implicit_capture=True``
+        No history terminates at a true absorption.  Instead **every** real
+        collision multiplies the history weight by the collision albedo
+        ``omega = kappa_s / kappa_e`` and the chain continues like at a
+        scattering (HG direction resampling).  The Woodcock density of real
+        collisions times the albedo product reproduces the removal series
+        exactly: the expected weight reaching path length s is
+        ``omega^{N(s)}``-averaged, ``exp(-tau_a(s))`` — the same absorption
+        attenuation the analog chain achieves by removal, with the score
+        spread over many small weights instead of few 0/1 terminations.
+        The `absorbed` output then marks only roulette/zero-weight kills.
+    ``roulette_floor=f`` (implies implicit_capture chains terminating early)
+        Russian roulette at every real collision: a history with ``w < f``
+        survives with probability 1/2 (weight doubled) or is killed; zero
+        weights are always killed.  Keeps the expected weight unchanged.
+    ``jit=True``
+        Route every generation's flight sampling through the numba kernel
+        (`rt3d.mc.jitmc`) when usable — statistically equivalent, numba's
+        own random stream (not the NumPy PCG64 stream).
 
     Parameters
     ----------
@@ -841,12 +880,13 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
     kappa_e = np.asarray(kappa_e, dtype=float)
     kappa_s = np.asarray(kappa_s, dtype=float)
     ks = kappa_s if scatter else np.zeros_like(kappa_s)
+    omega = np.where(kappa_e > 0.0, ks / np.maximum(kappa_e, 1e-300), 0.0)
 
     pos = o.copy()
     if periodic_box is not None:
         pos = periodic_box.wrap_xy(pos)
 
-    w = np.ones(K) if weights is None else np.asarray(weights, dtype=float)
+    w = np.ones(K) if weights is None else np.array(weights, dtype=float)
     direct = None if is_direct is None else np.asarray(is_direct, dtype=bool).copy()
 
     live = np.arange(K)
@@ -869,7 +909,7 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
 
         res = sample_collisions(pl, dl, budget, grid, kappa_e, ks, mode=mode,
                                 kappa_max=kappa_max, periodic_box=periodic_box,
-                                seed=seed + 1_000_003 * gen + 1)
+                                seed=seed + 1_000_003 * gen + 1, jit=jit)
         seg_end = res["exit_t"]
         path[live] += seg_end
 
@@ -898,18 +938,44 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
         exited[live[exit_ev]] = True
         absorbed[live[~scat & ~exit_ev]] = True
 
-        if not np.any(scat):
+        if implicit_capture:
+            # the albedo product carries the removal: multiply at EVERY real
+            # collision and keep all real-event histories alive; zero
+            # weights (pure absorption cells) are killed immediately
+            ir = ~exit_ev
+            if np.any(ir):
+                cr = res["coll_cell"][ir]
+                w[live[ir]] *= omega[cr]
+            cont = ir & (w[live] > 0.0)
+            absorbed[live[~scat & ~exit_ev]] = False
+            absorbed[live[ir & ~cont]] = True
+        else:
+            cont = scat
+
+        if not np.any(cont):
             break   # every history in this generation was absorbed or exited
 
-        isl = live[scat]
-        coll_cell = res["coll_cell"][scat]
-        pos[isl] = pl[scat] + res["coll_distance"][scat, None] * dl[scat]
+        isl = live[cont]
+        coll_cell = res["coll_cell"][cont]
+        pos[isl] = pl[cont] + res["coll_distance"][cont, None] * dl[cont]
         if periodic_box is not None:
             pos[isl] = periodic_box.wrap_xy(pos[isl])
-        d[isl] = hg_scatter_directions(dl[scat], coll_cell, g, rng)
-        n_scat[isl] += 1
+        d[isl] = hg_scatter_directions(dl[cont], coll_cell, g, rng)
+        n_scat[live[scat]] += 1
         if direct is not None:
             direct[isl] = False
+
+        # --- Russian roulette on the surviving population
+        if roulette_floor is not None and isl.size:
+            low = np.flatnonzero(w[isl] < float(roulette_floor))
+            if low.size:
+                li = isl[low]
+                surv = (w[li] > 0.0) & (rng.random(li.size) < 0.5)
+                w[li[surv]] *= 2.0
+                absorbed[li[~surv]] = True
+                keep = np.ones(isl.size, dtype=bool)
+                keep[low[~surv]] = False
+                isl = isl[keep]
 
         live = isl
         gen += 1
@@ -930,4 +996,7 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
         "mode": mode,
         "seed": int(seed),
         "scatter": bool(scatter),
+        "implicit_capture": bool(implicit_capture),
+        "roulette_floor": roulette_floor,
+        "jit": bool(jit),
     }
