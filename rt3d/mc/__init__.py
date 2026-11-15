@@ -23,6 +23,7 @@ with real null collisions), the event decision and the HG sampler; M1 adds the
 stage-1 mean-intensity solvers.
 """
 
+from rt3d.mc.backward import all_sky_cone_half, backward_all_sky, backward_detector_mc
 from rt3d.mc.estimators import cell_volumes, heating_rate, n_cells_of, track_tally
 from rt3d.mc.forward import j_mc, radiance_from_source, stage2_source
 from rt3d.mc.sources import (

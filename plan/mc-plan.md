@@ -1,19 +1,27 @@
 # Plan — Monte Carlo solvers (forward two-stage + backward adjoint), with null collisions
 
-Status: **M0 + M1 + M2 implemented** (M0: 2026-10-24, M1: 2026-11-13, M2:
-2026-11-14): `rt3d/mc/`
+Status: **M0 + M1 + M2 + M3 implemented** (M0: 2026-10-24, M1: 2026-11-13,
+M2: 2026-11-14, M3:
+2026-11-15): `rt3d/mc/`
 package (`tracking.py` Woodcock core + unigrid/octree DDA walkers + analog
 history chains, `sources.py` HG inverse-CDF + birth/face/beam samplers,
 `estimators.py` track-length tallies, `forward.py` stage-1 `j_mc` both
-variants + stage-2 `radiance_from_source` / `stage2_source`), shared case
+variants + stage-2 `radiance_from_source` / `stage2_source`, `backward.py`
+adjoint `backward_detector_mc` / `backward_all_sky`), shared case
 `rt3d/cases/slab_1d.py`,
 `scripts/mc_phase0_check.py`, `scripts/mc_forward_slab.py`,
-`scripts/mc_forward_cloud.py`,
+`scripts/mc_forward_cloud.py`, `scripts/mc_backward.py`,
 `tests/test_mc_tracking.py` (9) + `tests/test_mc_sources.py` (12) +
-`tests/test_mc_forward.py` (13) + `tests/test_mc_radiance.py` (5). All M0 validations green. M1 slab
+`tests/test_mc_forward.py` (13) + `tests/test_mc_radiance.py` (5) +
+`tests/test_mc_backward.py` (8). All M0 validations green. M1 slab
 validations green (J vs 1D-DO within 2 sigma + discretization allowance,
 variant agreement, Ng 14 vs 89 iterations at omega = 0.9, global closure
-|rel| ~ 1.3% — better than the SC-42 4.7%). Adds a second solver family next
+|rel| ~ 1.3% — better than the SC-42 4.7%). M3 adjoint validations green
+(closed-form absorber 3 sigma, slab/beam/octree vs SC per-node 2 sigma + 8%,
+cloud all-sky at node directions 21/21 inside 2 sigma + 10% rms-sky with
+hemispheric upward-flux closure adjoint −2.2% vs the SC-162 reference (SC-42
+itself −2.0%), narrow-sensor
+efficiency figure `plot/mc_backward.png`). Adds a second solver family next
 to the short-characteristics solver (`rt3d/`, phases 0-6 done). This plan
 reuses the octree (`rt3d/octree.py`), unigrid (`rt3d/geometry.py`),
 direction grid (`rt3d/directions.py`), ground BC
@@ -89,6 +97,41 @@ M2 implementation notes (stage-2 radiance, `radiance_from_source` +
 - Uncollided boundary term from the exact backward-march `tau_tot` with the
   inflow of the face the march exits (`bc.inflow` / `_entry_I_in`
   convention); Lambertian ground raises `NotImplementedError`.
+
+M3 implementation notes (backward adjoint solver, `rt3d/mc/backward.py`,
+validated by `tests/test_mc_backward.py` and `scripts/mc_backward.py`):
+
+- **Score deviation from the plan sketch (important)**: the adjoint walk
+  scores `(1-omega) B + omega F0 e^{-tau_b} Phi_HG(Omega_sun -> Omega_f)`
+  at every *real* collision and carries the diffuse rescattering by the
+  walk continuation itself (HG reciprocity = same HG about the reversed
+  direction, weight 1).  The sketch's `omega J` in the score **plus** HG
+  continuation would re-expand the already-scattered stage-1 field at all
+  orders and over-count.  Consequence: solver B needs **no stage-1 `J`** —
+  it solves the closed RTE (B, bc, beam) directly and is a genuinely
+  independent family next to solver A.  Because the real-event density is
+  `kappa_e e^{-tau}`, scores carry no `kappa_e` factor
+  (`kappa_e (1-omega) B = kappa_a B`, `kappa_e omega Phi = kappa_s Phi`);
+  the walk scores the face inflow when it exits the domain.
+- Detector: point or plane aperture + cone about `omega0`; uniform aperture
+  and cap sampling make the output the aperture/cone-**averaged radiance**
+  (no extra `Delta-omega` factor).  `backward_all_sky` runs one equal-area
+  icosahedral cap per upward ordinate (caps tile the hemisphere).
+- Validation anchors: closed-form Beer-Lambert slab (3 sigma), closed
+  scattering slab and beam slab vs converged `lambda_iteration` I per
+  upward ordinate (2 sigma + 8%), octree slab, global-mode nulls, all-sky
+  consistency at **exact node directions** (`cone_scale = 0` default:
+  slab 2 sigma + 5% rms-sky, cloud 2 sigma + 10% rms-sky + hemispheric
+  upward-flux closure vs SC-42 and an SC refine-2 / 162-ordinate strong
+  reference — see decision log: SC-42 *per-ordinate* radiance in the
+  `g ~ 0.55` cloud has angular errors far beyond the per-cell J errors;
+  full icosahedral caps cross the horizon and are not node-comparable).
+- Efficiency (measured, honest): at equal *single-ray* cost the fixed-source
+  next-flight tally scores once per history and has slightly lower
+  variance per collision than the walk; the adjoint win is the whole-image
+  cost — one all-sky image costs `N_up x n_seeds` walks instead of
+  `n_leaf x N_dir x n_h` forward rays (17 000x fewer rays on the cloud) —
+  and the absence of the whole stage-1 iteration.
 
 Decisions taken with the user up front:
 
