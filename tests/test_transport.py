@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Phase 1 anchors: SC sweep and beam sweep with kappa_s = 0 (Beer-Lambert)."""
+"""Phase 1 invariants: SC sweep and beam sweep with kappa_s = 0 (Beer-Lambert)."""
 
 import numpy as np
 import pytest
@@ -67,7 +67,7 @@ def test_subsegments_cover_path():
 
 def test_beer_lambert_slab_periodic(slab):
     """kappa_s = 0, B = 0: I = I_entry * exp(-kappa * path) for every
-    ordinate and cell (validation anchor 3)."""
+    ordinate and cell (verification invariant 3)."""
     grid, box = slab
     kappa = 0.7
     kappa_e = np.full(grid.n_cells, kappa)

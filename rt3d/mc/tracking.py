@@ -18,7 +18,7 @@ One flight-sampler / event-decision core shared by every MC solver:
 
 Both modes share the same event-decision logic (`event_decision`) and the
 same DDA traversal kernels; the tests (tests/test_mc_tracking.py) assert
-that cell and global mode agree statistically on the transmittance anchor.
+that cell and global mode agree statistically on the transmittance invariant.
 
 The two DDA walkers (`walk_lattice`, `walk_octree`) reproduce the SC
 marches `rt3d.geometry.march_lattice` and `rt3d.octree.march_octree`
@@ -111,7 +111,7 @@ def path_integral_from_segments(seg_ray, seg_cell, seg_len, cell_field, n_rays):
     """
     Per-ray path integral ``sum_segments cell_field[cell] * length`` from a
     segment record (as produced by `walk_lattice` / `walk_octree`).  Used
-    for the analytic ``tau = int kappa_e ds`` of the transmittance anchor
+    for the analytic ``tau = int kappa_e ds`` of the transmittance invariant
     and later for deterministic tallies.
     """
     out = np.zeros(n_rays, dtype=float)
@@ -466,7 +466,7 @@ def sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s,
 
     Scattering chains (regenerating diffuse photons) are *not* part of
     this primitive — it returns the first real event per photon, which is
-    everything the M0 anchors (transmittance, cell-vs-global equivalence)
+    everything the M0 invariants (transmittance, cell-vs-global equivalence)
     need; the stage-1 solvers (M1) loop over it.
 
     ``jit=True`` routes to the numba per-photon kernel
@@ -488,7 +488,7 @@ def sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s,
     grid : rt3d.geometry.unigrid or rt3d.octree.octree_grid
     kappa_e, kappa_s : (n_cells / n_leaf,) ndarray
         Cell/leaf fields (kappa_s may be all-zero for the pure
-        absorption / transmittance anchor).
+        absorption / transmittance invariant).
     mode : {"cell", "global"}
     kappa_max : float, optional
         Global-mode majorant cap (default ``max(kappa_e)``); ignored in
@@ -517,7 +517,7 @@ def sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s,
             global majorant mode.
         'survived' : (K,) bool
             True where the photon exited without a real collision — the
-            transmittance tally of anchor 3.
+            transmittance tally of invariant 3.
     """
     if jit:
         from rt3d.mc import jitmc

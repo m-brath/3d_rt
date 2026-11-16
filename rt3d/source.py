@@ -73,7 +73,7 @@ def delta_extinction(kappa_e, kappa_s, g, M):
     Only the *scattering* part of the extinction is delta-scaled: the
     phase function applies to scattering alone, so keeping absorption
     unscaled (a) leaves pure absorption (kappa_s = 0) exactly
-    Beer-Lambert (validation anchor 3 holds with delta on) and (b) keeps
+    Beer-Lambert (verification invariant 3 holds with delta on) and (b) keeps
     the explicit -omega * g**M * I source term's iteration gain
     omega * g**M (1 - g) / (1 - omega * g**M) < 1 for all omega < 1,
     whereas scaling the full extinction by (1 - g**M) diverges for

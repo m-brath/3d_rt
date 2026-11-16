@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Phase 2 anchors: scattering source, plain lambda iteration."""
+"""Phase 2 invariants: scattering source, plain lambda iteration."""
 
 import numpy as np
 import pytest
@@ -80,7 +80,7 @@ def test_uniform_source_E2(slab):
     # 42 ordinates on an anisotropic lattice (hz = hx/4): interior cells
     # agree to ~2e-3; the boundary cells carry the intrinsic stencil error
     # (intensity transported along vhat but weighted as Omega). The
-    # per-ordinate check below is the exact anchor.
+    # per-ordinate check below is the exact invariant.
     assert np.max(np.abs(J - J_exact)) < 2e-2
     # exact per-ordinate check: I = S (1 - exp(-tau_path)) along vhat,
     # tau_path measured from the entry face (bottom for vz > 0, top for vz < 0)

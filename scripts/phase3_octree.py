@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Phase 3 validation (plan section 6, validation anchor 5):
+Phase 3 validation (plan section 6, verification invariant 5):
 octree vs uniform grid on the class_test.py Gaussian cloud.
 
 The octree transport sweep follows EXACT characteristics: one backward

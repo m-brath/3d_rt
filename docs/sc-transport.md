@@ -532,17 +532,17 @@ beam term keep the physical $\kappa_e$.
 
 ---
 
-## 11. Validation anchors touching transport
+## 11. Verification invariants touching transport
 
-From `AGENTS.md` / MANUAL §14 — which sweep property each anchors:
+From `AGENTS.md` / MANUAL §14 — which sweep property each invariants:
 
-| anchor | what it checks in the transport | runner |
+| invariant | what it checks in the transport | runner |
 |---|---|---|
 | 3 | $\kappa_s = 0$, $B = 0$ ⇒ $I = I_{\text{in}} e^{-\tau}$ along **every** characteristic — pure recursion + march correctness | `scripts/phase1_beer.py` |
 | 4 | $\nabla\cdot F$ = heating rate from $I$ — quadrature + sweep energy consistency | MANUAL §11 worked example |
 | 5 | octree result converges to the unigrid result on the Gaussian cloud — both transport paths agree in the refinement limit | `scripts/phase3_octree.py` |
 
-Anchor 3 is exact for the chain and exact-octree sweeps (true-ray
+Invariant 3 is exact for the chain and exact-octree sweeps (true-ray
 characteristics). For `transport="sc"` (§12) it holds to machine precision
 for $z$-entry ordinates only; oblique ordinates carry a bounded,
 resolution-independent angular stencil error
@@ -602,7 +602,7 @@ integrated. Measured on the homogeneous slab (42 ordinates, refinement
 8 → 16 → 32): the transmittance error is then O(1) and *scale-invariant*
 ($\tau$ effectively halved for $z$-entry ordinates). With the gap
 segment, $z$-entry ordinates reproduce $e^{-\kappa_e s}$ to machine
-precision (anchor 3 holds for them); oblique ($x/y$-entry) ordinates
+precision (invariant 3 holds for them); oblique ($x/y$-entry) ordinates
 keep a bounded angular stencil error of the same character as the chain
 method's grazing-ordinate error — it does **not** shrink with $h$,
 because the discrete recursion's effective direction is set by the

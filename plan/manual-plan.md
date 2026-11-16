@@ -89,10 +89,10 @@ green), not the aspirational names in `plan/plan.md` (e.g. the entry point is
     `icosphere_grid.py` are read-only legacy reference.
 13. **Condensed API reference** — signature + one-line description tables for
     all ~48 public functions/classes.
-14. **Validation anchors** — the 5 physics anchors from AGENTS.md with measured
+14. **Verification invariants** — the 5 physics invariants from AGENTS.md with measured
     numbers: `sum(w_i)=4π`; `∮Phi dΩ=1`; transmittance = exp(−tau) at machine
-    precision (octree exact march); anchor 4 div F vs heating rate (rms 1.6%,
-    max 14%, global closure 3.2%); anchor 5 octree-vs-unigrid 18% J difference
+    precision (octree exact march); invariant 4 div F vs heating rate (rms 1.6%,
+    max 14%, global closure 3.2%); invariant 5 octree-vs-unigrid 18% J difference
     interpretation (unigrid grazing-ordinate stencil error, not octree error).
 15. **Known limitations & performance** — 42 ordinates ≈6% J error at g≈0.95,
     even 642 not fully converged at g=0.952, non-monotone angular convergence

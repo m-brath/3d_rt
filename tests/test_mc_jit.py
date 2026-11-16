@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MC phase M4 anchors (plan/mc-plan.md section 2/7): numba fast path of the
+MC phase M4 invariants (plan/mc-plan.md section 2/7): numba fast path of the
 flight sampler (`rt3d.mc.jitmc`, jit.py fallback pattern).
 
   1. unigrid, cell + global mode: the compiled per-photon walk reproduces
@@ -8,7 +8,7 @@ flight sampler (`rt3d.mc.jitmc`, jit.py fallback pattern).
      the mean uncollided exit path within a few percent
   2. octree (gaussian cloud, depth-3), cell + global: same statistical
      equivalence, collision leaves in range
-  3. transmittance anchor (plan anchor 3) ON the jit path: pure absorber,
+  3. transmittance invariant (plan invariant 3) ON the jit path: pure absorber,
      MC survival == exp(-tau) within 4 sigma
   4. plumbing: `sample_collisions(jit=True)` routes through the kernel
      when `jit_mc_usable` (same return keys, cell mode stays null-free);
@@ -118,7 +118,7 @@ def test_jit_octree_stats():
             assert np.count_nonzero(rb["n_null"]) > 1000
 
 
-def test_jit_transmittance_anchor():
+def test_jit_transmittance_invariant():
     grid, box, hz = slab_grid(4.0, 2.0, nz=16, nxy=4)
     ke = np.full(grid.n_cells, 2.0)
     ks = np.zeros(grid.n_cells)

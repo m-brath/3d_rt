@@ -7,7 +7,7 @@ transport / grid / iteration / δ-M / backend options) and the Monte Carlo famil
 pass/fail pytest gate plus a CSV/figure report script.
 
 Decisions taken with the user (2026-11-16): pytest gate **and** report script; both solver
-families cross-checked; runtime is not a constraint (thorough); correctness is anchored on
+families cross-checked; runtime is not a constraint (thorough); correctness is invarianted on
 a **fine-octree reference + refinement ladder** (extends the idea of
 `plan/transport-ranking-plan.md`); today's measured imperfection bands are **pinned as
 regression thresholds**; the **MC Lambertian-ground gap is fixed as part of this work**
@@ -106,9 +106,9 @@ only "sigma-resolved cells" (117 759 of 360 k), where rms z = 1.05. Any serious 
 an explicit **noise-validity mask** (§6.2) and must *report* the tail fraction rather than
 assume Gaussianity.
 
-**Finding F4 — anchor 4 (div F = heating) is unigrid-only.**
+**Finding F4 — invariant 4 (div F = heating) is unigrid-only.**
 `rt3d/diagnostics.py:flux_divergence` and `energy_balance` index `grid.nx/ny/nz` and raise
-`AttributeError` on an octree. So the energy-conservation anchor currently cannot be
+`AttributeError` on an octree. So the energy-conservation invariant currently cannot be
 evaluated on the octree grids where the accuracy ranking lives. Fixed by §8.
 
 **Finding F5 — the MC λ-variant residual floor.** With fresh sampling per iteration
@@ -137,7 +137,7 @@ blob, so the extrapolated source overshoots.  **Not a test-suite defect and not 
 here** -- the acceleration is still exercised for fixed-point agreement, and a better
 Λ̄ (or 3-D) remains a solver-side improvement.
 
-**Finding F7 — anchor 4 is octree-capable now, and its residual is the face
+**Finding F7 — invariant 4 is octree-capable now, and its residual is the face
 extrapolation, not the physics (T4 pass).**
 `rt3d/diagnostics.py` grew `cell_volumes`, `face_powers` and a per-leaf
 `flux_divergence`, and `energy_balance` dispatches on grid type (unigrid path
@@ -172,7 +172,7 @@ Three conclusions that shape the T4 assertions:
    (they do not shrink u24 → u48, and chain/sc differ by a factor 5), so they are
    pinned as bands and used as a discriminating diagnostic only.
 
-Local anchor (`div F` vs `4πκ_a(B−J)`, conservative field where the exact answer
+Local invariant (`div F` vs `4πκ_a(B−J)`, conservative field where the exact answer
 is 0): mean |div F|/(|F_z|/Lz) = 0.052 max 0.42 (u24) vs 0.115 max 1.03 (oct d2).
 Cross-family absorbed power on oct d2: SC-42 144.94, SC-162 141.09, MC A1 (2·10⁵
 boundary histories) 142.07 ± 0.26 — i.e. the 2 % SC-vs-MC gap is the **42-ordinate
@@ -315,10 +315,10 @@ periodic x/y wrap off makes it *larger* (9.5e-2 vs 4.0e-2), so it is not a wrap
 bug; on a 1D slab it is only 1.0e-2 (and 1.7e-3 with a single transverse column),
 which is why every 1D-based validation in the suite passes.
 
-Consequences for AGENTS.md validation anchor 3 (`kappa_s = 0`, `B = 0` →
+Consequences for AGENTS.md verification invariant 3 (`kappa_s = 0`, `B = 0` →
 transmittance = `exp(-tau)` along *every* ray): it holds for the octree sweep and
 for the march-based estimators to round-off, and on the unigrid only for z-entry
-ordinates.  The matrix must therefore state the anchor **per family** and pin the
+ordinates.  The matrix must therefore state the invariant **per family** and pin the
 unigrid violation as a band, and any statement that "the unigrid ladder converges
 to the same solution as the octree" is false at the 4 % level.
 
@@ -407,11 +407,11 @@ comparison is F14-limited, not noise-limited.
 
 Each tier is a separate pytest module so that selection by marker/file is meaningful.
 
-### T0 — invariant & anchor sweep across every variant (fast, no full solve)
-File: `tests/test_matrix_anchors.py`
+### T0 — invariant & invariant sweep across every variant (fast, no full solve)
+File: `tests/test_matrix_invariants.py`
 
-AGENTS.md anchors 1–3 re-run **per variant**, in one parametrized sweep, so a new backend
-cannot quietly drop an anchor:
+AGENTS.md invariants 1–3 re-run **per variant**, in one parametrized sweep, so a new backend
+cannot quietly drop an invariant:
 1. `sum(w) == 4π` for icosahedral refinement 0–3 (already in `test_directions.py`; here
    also asserted through the MC sampling path: `isotropic_directions`,
    `face_inflow_directions` measure identity, HG inverse-CDF Legendre moments vs
@@ -446,7 +446,7 @@ Same case, same grid, one solve per variant, then differenced pairwise:
   (chain) vs 0.5924 (sc) = 2.7 %, while oblique ordinates in the optically thin parts
   of the field carry the large deviations.
 - ground on/off, beam on/off, periodic vs non-periodic sides: structure checks + the
-  exact phase-5 ground anchors re-run for `chain`, `sc` and octree (already in
+  exact phase-5 ground invariants re-run for `chain`, `sc` and octree (already in
   `test_ground.py` for chain/octree; `sc` gets its own).
 - guards: `transport="sc"` + octree → `ValueError`; variable `ground.height` →
   `NotImplementedError`; `kappa_e = 0` vacuum cells → `omega = 0`, no NaN/Inf.
@@ -490,7 +490,7 @@ Common (ground-free) case until M6, all-sky case afterwards:
   seed reproducibility (same seed bit-identical, different seeds within combined σ), and a
   χ² seed-independence check over ≥ 8 seeds.
 
-### T4 — global physics closures per family (anchor 4)
+### T4 — global physics closures per family (invariant 4)
 File: `tests/test_matrix_closure.py`
 
 For each family on the same case: net face power vs `∫4πκ_a(B−J)dV`, using the new
@@ -518,7 +518,7 @@ kept at the end of this subsection).  As built:
 - *Unigrid ladder* `u12 → u48` against **u96 of the same family** (slope
   ∈ [0.6, 1.6] in h, measured 1.0) — never differenced against the octree for
   the fit, because the cross-family gap does not vanish (F11).
-- *Anchor 3 stated per family*: pure absorber vs analytic `exp(-kappa s)` —
+- *Invariant 3 stated per family*: pure absorber vs analytic `exp(-kappa s)` —
   octree sweep and deterministic march exact to 1e-12, unigrid `chain` pinned
   in a violation band (rms 0.05–0.25, max 0.10–0.55).
 - *F11 pinned*: unigrid chain-vs-exact-march rms-J band [0.03, 0.05] at
@@ -556,7 +556,7 @@ across the *full* option matrix, **(b)** the deterministic SC ≡ MC identity te
 parametrized over δ-M/beam/grid, **(c)** a statistical methodology with an explicit
 noise-validity mask, **(d)** the refinement-ladder ranking with convergence-order fits,
 **(e)** the octree energy closure and the MC ground capability. Where an existing test
-already pins an anchor, the matrix tests *reuse* the case fixtures instead of re-deriving
+already pins an invariant, the matrix tests *reuse* the case fixtures instead of re-deriving
 them, and no existing test file is rewritten.
 
 ## 5. New files
@@ -565,7 +565,7 @@ them, and no existing test file is rewritten.
 tests/matrix_cases.py      case builders + grid factories (cloud/slab, levels cached by
                            fixture) + the memoized converged-solve helper
 tests/matrix_stats.py      z-stats, noise-validity mask, pooled chi2, slope fits, band asserts
-tests/test_matrix_anchors.py        T0
+tests/test_matrix_invariants.py        T0
 tests/test_matrix_equivalence.py    T1
 tests/test_matrix_crossfamily.py    T2
 tests/test_matrix_statistics.py     T3        (mark: mc)
@@ -665,7 +665,7 @@ would need two disjoint case setups forever. Scope mirrors SC phase 5
    tested.
 
 Verification of M6 (before the matrix re-uses the all-sky case):
-- SC phase-5 anchors re-run for MC: pure-absorber ground Beer-Lambert with albedo A
+- SC phase-5 invariants re-run for MC: pure-absorber ground Beer-Lambert with albedo A
   (`test_ground.py:63` analogue), analytic ground emission `I = eps B_g` in vacuum,
   reflected-beam irradiance `A F0 |μ_sun| exp(−τ_b)/π`;
 - MC all-sky at the cloud-top pixel vs SC all-sky (`diagnostics.allsky`) within the same
@@ -769,7 +769,7 @@ docs — keep it opt-in via `--reference-ordinates 3`; the default reference is 
    docstring + bands carry the measured numbers: yardstick self-error 6.8e-3 rms J at the
    τ-saturation floor, REF rung 5.5e-3 / 5.3e-2, τ-ladder slope 0.6 in `tau_max` with
    max-J and mean-J floors pinned as bands, unigrid Cauchy slope 1.03 with the
-   vs-u96 distance only monotone+banded (F11), anchor 3 per family (octree/march 1e-15,
+   vs-u96 distance only monotone+banded (F11), invariant 3 per family (octree/march 1e-15,
    chain 1.2–1.4e-1), MC order −0.49 by seed splitting, cost ranking oct ≥ chain ≥ sc,
    δ-M shift 4.5e-4 ≪ rung self-error).
 7. Phase M6 (MC ground) with its own verification (§7), then re-enable the all-sky case

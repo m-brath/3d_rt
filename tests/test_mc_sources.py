@@ -3,7 +3,7 @@
 MC phase M0 source samplers (plan/mc-plan.md section 1): HG inverse-CDF
 sampling must reproduce the continuous HG moments (E[P_n(cos t)] = g^n)
 and agree with the `hg_matrix` quadrature moments to quadrature accuracy
-(companion of validation anchor 2).
+(companion of verification invariant 2).
 
 Birth-point sampling vs. analytic rates joins this file with M1.
 """
@@ -82,7 +82,7 @@ def test_hg_moments_vs_hg_matrix_quadrature(g):
     rng = np.random.default_rng(23)
     c = hg_cos_theta(rng.random(400_000), g)
     for n in range(4):
-        quad = np.sum(w * hg(cos, g) * _legendre(n, cos))  # unnormalized anchor-2 quadrature
+        quad = np.sum(w * hg(cos, g) * _legendre(n, cos))  # unnormalized invariant-2 quadrature
         mc = np.mean(_legendre(n, c))
         se = np.sqrt(np.var(_legendre(n, c)) / c.size)
         assert abs(mc - quad) <= abs(g**n - quad) + 6.0 * se, (

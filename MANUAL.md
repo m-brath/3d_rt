@@ -26,7 +26,7 @@ it* and cross-references the plan instead of duplicating the log.
   11. [Worked end-to-end example](#11-worked-end-to-end-example)
   12. [Runner scripts](#12-runner-scripts)
   13. [Condensed API reference](#13-condensed-api-reference)
-  14. [Validation anchors](#14-validation-anchors)
+  14. [Verification invariants](#14-validation-invariants)
   15. [Known limitations and performance](#15-known-limitations-and-performance)
 
 ---
@@ -193,7 +193,7 @@ convergence study.
 each triangle's spherical excess (L'Huilier's formula) is split equally among
 its three corner vertices (`solid_angle_weights`). Icosphere vertices are not
 equal-area, so this distinction matters. The weights satisfy
-$\sum_i w_i = 4\pi$ to machine precision (validation anchor 1).
+$\sum_i w_i = 4\pi$ to machine precision (verification invariant 1).
 
 **Equator guard.** On construction the grid is rotated about a generic axis
 (`direction_grid._rotate_off_poles`) so that **no ordinate has exactly
@@ -279,7 +279,7 @@ leaf center along $-\boldsymbol{\Omega}$ to the domain entry point* (DDA
 through the octree, `octree.march_octree`), once per ordinate, and reuses the
 segments in every iteration. The only remaining path error is the octree's
 own resolution of the piecewise-constant field. On the unigrid the
-lattice-stencil chain is kept (its error is the documented anchor-5 effect,
+lattice-stencil chain is kept (its error is the documented invariant-5 effect,
 §14).
 
 > **Performance note** (plan/optimization-plan.md): with `numba` installed
@@ -558,10 +558,10 @@ leave it off for $g \lesssim 0.5$.
   $\omega/(1 - \omega g^M)$ in `beam_scattering_source`.
 - **Octree refinement.** Still driven by the physical $\kappa_e$ — it
   runs outside the solver (§5).
-- **Validation anchors.** Anchor 3 (exact Beer–Lambert at
+- **Verification invariants.** Invariant 3 (exact Beer–Lambert at
   $\kappa_s = 0$) holds with delta on — this is *why* only the
   scattering part of the extinction is scaled: full-extinction scaling
-  $\kappa_e (1 - g^M)$ breaks anchor 3 at $O(\tau_{\mathrm{cell}})$ and
+  $\kappa_e (1 - g^M)$ breaks invariant 3 at $O(\tau_{\mathrm{cell}})$ and
   makes plain LI diverge for $\omega < g^M$ (plan decisions log,
   `plan/delta-m-plan.md`).
 
@@ -866,7 +866,7 @@ locked by `tests/test_jit.py`.
   ($\int 4\pi\kappa_a (B-J)\,dV$),
   `residual = out_top + out_bottom − heating`. With a beam, subtract the
   first-scatter input $\int \kappa_s F_0 e^{-\tau_b}\,dV$ from the residual
-  to close the diffuse-field balance (§11, §14 anchor 4).
+  to close the diffuse-field balance (§11, §14 invariant 4).
 - `allsky(grid, I, dg, face="top") -> dict` — outgoing intensity images at a
   horizontal face for every leaving ordinate: `omega (n_out,3)`,
   `weights (n_out,)`, `images (n_out, ny, nx)`; `face="top"` uses upward
@@ -1023,7 +1023,7 @@ print(f"top-of-domain mean F_z: unigrid "
       f"{res['F'][-grid.ny*grid.nx:, 2].mean():.4f}, "
       f"octree {res_oct['F'][top_layer, 2].mean():.4f}")
 
-# diffuse-field energy closure (phase-5 recipe, §14 anchor 4)
+# diffuse-field energy closure (phase-5 recipe, §14 invariant 4)
 kappa_a = kappa_e - kappa_s
 bal = energy_balance(grid, res["I"], dg, kappa_a, B)
 tau_b = beam_optical_depth(grid, beam["omega_sun"], kappa_e, periodic_box=box)
@@ -1035,7 +1035,7 @@ in_diff = np.sum(dg.weights[dg.down_idx]
 print(f"  diffuse closure residual {res_dif:9.2f}"
       f"  ({abs(res_dif) / (in_diff + beam_scat) * 100:.2f}% of diffuse input)")
 
-# pointwise anchor 4: div F vs heating rate in the interior
+# pointwise invariant 4: div F vs heating rate in the interior
 divF = flux_divergence(grid, res["F"])
 heat = heating_rate(kappa_a, res["J"], B)
 kk = np.arange(grid.n_cells) // (grid.ny * grid.nx)
@@ -1078,7 +1078,7 @@ fig.savefig("plot/manual_example_fields.png", dpi=140)
 plt.close(fig)
 
 # (b) the same slice on the octree leaves.  A plane through y = 0 coincides with
-# a cell face at *every* refinement level (the base lattice is anchored at -5
+# a cell face at *every* refinement level (the base lattice is invarianted at -5
 # with h0 = 1.25), which would either leave holes or draw overlapping leaves;
 # offsetting by a quarter of the finest cell puts the plane strictly inside one
 # leaf per (x, z) column at all levels.
@@ -1296,7 +1296,7 @@ cloud, for 25 264 leaves instead of the $24^3 = 13824$ unigrid cells:
 
 **Mean intensity $J$** — left: $y = 0$ slice through the cloud on the unigrid,
 colourbar $J/F_0$; right: band-mean $J$ profiles, unigrid $24^3$ vs octree (the
-difference is the unigrid grazing-ordinate stencil error, anchor 5):
+difference is the unigrid grazing-ordinate stencil error, invariant 5):
 
 ![Mean intensity J: y=0 slice (unigrid, left) and band-mean J profiles unigrid vs octree (right)](plot/manual_example_j.png)
 
@@ -1327,7 +1327,7 @@ Interpreting the result dict and the diagnostics:
   iteration $k$.
 - **unigrid vs octree J**: the ~10–30% band-mean differences are the
   *unigrid* lattice-stencil path error for grazing ordinates in the strongly
-  heterogeneous cloud (validation anchor 5, §14) — the octree
+  heterogeneous cloud (verification invariant 5, §14) — the octree
   exact-characteristic result is the better one; the top-of-domain flux,
   dominated by near-vertical paths, agrees to 0.4%.
 - **energy closure**: `energy_balance` alone leaves the beam first-scatter
@@ -1335,7 +1335,7 @@ Interpreting the result dict and the diagnostics:
   $\int \kappa_s F_0 e^{-\tau_b}\,dV$ the global diffuse balance closes to
   **2.96%** of the incident diffuse power — the discretization error of the
   42-ordinate / $24^3$ solve, not a conservation bug.
-- **pointwise div F vs heating**: rms 1.6% of max|heating| — anchor 4.
+- **pointwise div F vs heating**: rms 1.6% of max|heating| — invariant 4.
 - Figures: `plot/manual_example_fields.png` (input fields $\kappa_e$, $\kappa_s$,
   $g$), `plot/manual_example_octree.png` (same slice on the octree leaves + the
   refinement levels), `plot/manual_example_j.png` (J slice + profile),
@@ -1356,12 +1356,12 @@ $env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
 
 | script | what it validates |
 |---|---|
-| `phase0_check.py` | direction grid rebuilds for $n_{\mathrm{refine}}$ 0–3 (12/42/162/642), $\sum w = 4\pi$, $\oint\Phi\,d\Omega = 1$, no $\Omega_z = 0$ ordinate, ray-box exit + DDA march consistency (anchors 1–2). |
-| `phase1_beer.py` | uniform-grid short characteristics: beam $I = F_0 e^{-\tau_b}$, diffuse transmittance vs Beer–Lambert for every ordinate/cell (anchor 3), isothermal $I = B$ exactness. |
+| `phase0_check.py` | direction grid rebuilds for $n_{\mathrm{refine}}$ 0–3 (12/42/162/642), $\sum w = 4\pi$, $\oint\Phi\,d\Omega = 1$, no $\Omega_z = 0$ ordinate, ray-box exit + DDA march consistency (invariants 1–2). |
+| `phase1_beer.py` | uniform-grid short characteristics: beam $I = F_0 e^{-\tau_b}$, diffuse transmittance vs Beer–Lambert for every ordinate/cell (invariant 3), isothermal $I = B$ exactness. |
 | `phase2_slab.py` | scattering + plain λ-iteration on a 1D slab ($\tau = 5$, $\omega = 0.5/0.9$) vs an independent 64-level Gauss–Legendre discrete-ordinates solver and the two-stream approximation. The slab case lives here (no `slab_1d` module). |
-| `phase3_octree.py` | octree vs unigrid on the Gaussian cloud (anchor 5): chain-vs-exact-path sanity (`build_chain_octree` reference), octree self-convergence, column $\tau \to 10$, scattering run at $\omega \le 0.7$. |
+| `phase3_octree.py` | octree vs unigrid on the Gaussian cloud (invariant 5): chain-vs-exact-path sanity (`build_chain_octree` reference), octree self-convergence, column $\tau \to 10$, scattering run at $\omega \le 0.7$. |
 | `phase4_ng.py` | 1D Ng acceleration: LI vs Ng iteration counts as $\omega \to 1$ (slab), cloud on unigrid ($\omega \le 0.9$, per-cell $g$) and on the octree. |
-| `phase5_ground.py` | periodic sides + Lambertian ground + all-sky output; analytic ground Beer–Lambert checks; pointwise div F vs heating and global energy balance incl. beam/ground terms (anchor 4). |
+| `phase5_ground.py` | periodic sides + Lambertian ground + all-sky output; analytic ground Beer–Lambert checks; pointwise div F vs heating and global energy balance incl. beam/ground terms (invariant 4). |
 | `phase6_directions.py` | direction-grid convergence 42 → 162 → 642 on the cloud, $g = 0.952$ slab (known 42-ordinate limitation), performance pass (chain build + sweep time vs $N_{\mathrm{dir}}$), npz record with `n_refine`. |
 
 `scripts/class_test.py` and `scripts/icosphere_grid.py` are **read-only
@@ -1491,9 +1491,9 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 | `gauss(x, y, z, sigma=1.0, mu=(0,0,4))` | normalized 3D Gaussian |
 | `gaussian_cloud(sigma=1.0, mu=(0,0,4), tau_column_max=10.0, omega_cap=None)` | class_test.py cloud as box + callable fields |
 
-## 14. Validation anchors
+## 14. Verification invariants
 
-The five physics anchors from AGENTS.md, with measured numbers (all
+The five physics invariants from AGENTS.md, with measured numbers (all
 re-verified for this manual unless marked "phase record"):
 
 1. **$\sum_i w_i = 4\pi$ over the direction grid.**
@@ -1512,7 +1512,7 @@ re-verified for this manual unless marked "phase record"):
    $7.1\times 10^{-14}$ — machine precision.
    (For contrast, the unigrid lattice stencil on the same test has path
    errors up to $\tau \approx 34$ for grazing ordinates — the documented
-   stencil error, not a bug; see anchor 5.)
+   stencil error, not a bug; see invariant 5.)
 
 4. **div $F$ equals the heating rate from the intensity field.**
    Cloud + ground + beam run (phase 5 setup; reproduced in §11): pointwise

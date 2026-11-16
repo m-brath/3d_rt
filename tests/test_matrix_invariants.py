@@ -2,9 +2,9 @@
 """
 T0 of the solver-matrix plan (plan/solver-test-matrix-plan.md section 3):
 physics invariants re-run **across every solver variant**, so a new backend,
-transport or sampler cannot silently drop one of the AGENTS.md anchors.
+transport or sampler cannot silently drop one of the AGENTS.md invariants.
 
-Anchors covered here:
+Invariants covered here:
 
 1. direction-grid measure: ``sum(w) == 4 pi``, unit ordinates, no ordinate on
    the equator, and the measure of the two Monte Carlo direction samplers
@@ -60,7 +60,7 @@ from rt3d.transport import (
 
 @pytest.mark.parametrize("n_refine", [0, 1, 2, 3])
 def test_solid_angle_measure(n_refine):
-    """Anchor 1: the icosahedral weights sum to 4 pi at every level."""
+    """Invariant 1: the icosahedral weights sum to 4 pi at every level."""
     dg = direction_grid(n_refine)
     assert dg.n_dir == 10 * 4**n_refine + 2
     assert abs(dg.weights.sum() - 4.0 * np.pi) < 1e-12
@@ -98,7 +98,7 @@ def test_cosine_face_measure(side):
 
 @pytest.mark.parametrize("g", [-0.5, 0.0, 0.3, 0.7, 0.9])
 def test_hg_sampler_moments(g):
-    """The HG inverse-CDF reproduces the Legendre moments g**n (anchor 2)."""
+    """The HG inverse-CDF reproduces the Legendre moments g**n (invariant 2)."""
     rng = np.random.default_rng(3)
     mu = hg_cos_theta(rng.random(400_000), g)
     assert mu.min() >= -1.0 and mu.max() <= 1.0
@@ -146,7 +146,7 @@ def test_hg_quadrature_normalization(g, n_refine):
 @pytest.mark.parametrize("g,tol", [(-0.5, 1e-8), (0.0, 1e-12), (0.5, 1e-8),
                                    (0.9, 1e-7), (0.99, 5e-5)])
 def test_hg_analytic_normalization(g, tol):
-    """The continuous HG phase function integrates to 1 (analytic, anchor 2)."""
+    """The continuous HG phase function integrates to 1 (analytic, invariant 2)."""
     mu = np.linspace(-1.0, 1.0, 2_000_001)
     integral = 2.0 * np.pi * np.trapezoid(hg(mu, g), mu)
     assert abs(integral - 1.0) <= tol
@@ -249,9 +249,9 @@ def test_transmittance_sc_numpy(box_and_grids):
 
 def test_transmittance_vertical_all_transports(box_and_grids):
     """
-    Exactness anchor on the vertical direction (not a grid member: the
+    Exactness invariant on the vertical direction (not a grid member: the
     icosahedral grid is rotated off the poles, which is why the transmittance
-    anchors above run over the grid's own ordinates).
+    invariants above run over the grid's own ordinates).
 
     Every transport must reproduce exp(-kappa (z1 - z)) to machine precision
     for a vertical characteristic.

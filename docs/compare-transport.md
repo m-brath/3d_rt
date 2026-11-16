@@ -43,7 +43,7 @@ solar beam, reflecting ground):
 
 1. **chain vs. SC** — how large is the pure *transport-algorithm* error when
    both run on *identical cells*?
-2. **unigrid vs. octree** — the grid-refinement error (validation anchor 5).
+2. **unigrid vs. octree** — the grid-refinement error (verification invariant 5).
 3. **delta-M on/off** — does it accelerate convergence, and does the
    converged solution stay the same (the equivalence claim of
    `plan/delta-m-plan.md`)?
@@ -131,7 +131,7 @@ normalised to the incident beam flux F₀ = 1.
   s, characteristics run center-to-center across the whole grid in
   multi-cell chains. Exact for piecewise-constant sources along the chain;
   carries the known *grazing-ordinate stencil error* on coarse grids
-  (MANUAL §6, anchor 5).
+  (MANUAL §6, invariant 5).
 - **`sc` (unigrid)** — single-cell short characteristics
   (`rt3d/short_characteristics.py`, `plan/plan-sc-unigrid.md`):
   gap segment + target segment of equal length, bilinear 4-point face
@@ -270,7 +270,7 @@ cancellation.
   absorbed (ω = 0.9, τ = 10) — J is lower everywhere below and inside the
   cloud (0.368 vs 0.437 in the bottom band).
 - **unigrid-chain vs. octree** (18% max, 2.8% mean) reproduces the
-  anchor-5 pattern of the manual: the unigrid grazing-ordinate stencil
+  invariant-5 pattern of the manual: the unigrid grazing-ordinate stencil
   error inflates J below the cloud (0.437 vs 0.310 in the bottom band,
   the manual's 29%), with a ring structure around the cloud in the
   difference maps.
@@ -453,7 +453,7 @@ ranking and why refining the unigrid alone does not close the gap.
    where κ_e demands them (0.078 m in the reference cloud core) *and*
    marching along the true ordinate directions; its exact-march transport
    removes the chain's grazing-ordinate stencil error, which is why
-   unigrid-chain vs. octree is the manual's anchor-5 pattern.
+   unigrid-chain vs. octree is the manual's invariant-5 pattern.
 5. **δ-M is scheme- and grid-agnostic in the converged solution**: the
    δ-on↔δ-off differences are ~2 orders of magnitude smaller than any
    scheme comparison, so the comparison is not confounded by the

@@ -649,7 +649,7 @@ for x, y, vid in cl:
     ax.annotate(vid.split("/")[0], (x, max(y, 1e-6)), fontsize=7,
                 xytext=(3, 3), textcoords="offset points")
 ax.set_xlabel("cells"); ax.set_ylabel("relative closure residual")
-ax.set_title("anchor-4 closure residual (F7: face extrapolation dominated)")
+ax.set_title("invariant-4 closure residual (F7: face extrapolation dominated)")
 fig.tight_layout()
 fig.savefig(os.path.join(OUT, "closure.png"), dpi=130)
 plt.close(fig)

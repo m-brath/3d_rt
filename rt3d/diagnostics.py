@@ -3,7 +3,7 @@
 Diagnostics (plan section 6): heating rate, flux divergence, global energy
 balance, all-sky output images, angular variance of the intensity.
 
-Energy conservation (validation anchor 4): from the RTE,
+Energy conservation (verification invariant 4): from the RTE,
 
     div F = int (Omega . grad I) dOmega = 4 pi S - kappa_e 4 pi J
           = 4 pi kappa_a (B - J)      (S = (1-omega) B + omega J)
@@ -257,7 +257,7 @@ def angular_variance(I, dg):
 
 def energy_balance(grid, I, dg, kappa_a, B):
     """
-    Global energy conservation check (validation anchor 4), any grid.
+    Global energy conservation check (verification invariant 4), any grid.
 
     Net outward flux through the top and bottom faces vs the volume-
     integrated heating rate ``int 4 pi kappa_a (B - J) dV = int div F dV``.

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Phase 5 validation (plan section 7): periodic sides + Lambertian ground +
-all-sky output; energy conservation (validation anchor 4).
+all-sky output; energy conservation (verification invariant 4).
 
 Cells:
   1. Beer-Lambert slab with Lambertian ground albedo: per-ordinate
@@ -159,7 +159,7 @@ kappa_a = grid.kappa_e - grid.kappa_s
 V = (grid.x[1] - grid.x[0]) * (grid.y[1] - grid.y[0]) * (grid.z[1] - grid.z[0])
 A_col = (grid.x[1] - grid.x[0]) * (grid.y[1] - grid.y[0])
 
-# pointwise anchor 4: div F = 4 pi kappa_a (B - J)
+# pointwise invariant 4: div F = 4 pi kappa_a (B - J)
 F = flux_vector(res["I"], dg)
 divF = flux_divergence(grid, F)
 heat = heating_rate(kappa_a, res["J"], 0.0)
@@ -243,7 +243,7 @@ ax.plot(F4[:, 12, 12, 0], grid.z, "k-", label="div F")
 ax.plot(F4[:, 12, 12, 1], grid.z, "--x", label="4$\\pi\\kappa_a$(B-J)")
 ax.set_xlabel("per volume")
 ax.set_ylabel("z [m]")
-ax.set_title("anchor 4: div F = heating (column)")
+ax.set_title("invariant 4: div F = heating (column)")
 ax.legend()
 
 ax = fig.add_subplot(1, 3, 3)

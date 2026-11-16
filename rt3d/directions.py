@@ -295,7 +295,7 @@ class direction_grid(object):
 
         With normalize=True (the default) each row is rescaled so that
         sum_j W[i, j] = 1 exactly.  The analytic HG function integrates to 1
-        over the sphere (validation anchor 2), but the coarse icosahedral
+        over the sphere (verification invariant 2), but the coarse icosahedral
         quadrature breaks this at large g (42 ordinates, g = 0.952: row sums
         17-22), which makes the lambda-iteration scattering operator
         supercritical and divergent for omega not far below 1.  Row

@@ -29,7 +29,7 @@ asserted below):
   the true characteristic, so both carry a bounded, **resolution-independent**
   grazing-ordinate error — 11–14 % rms against the analytic exponential in
   the pure-absorber limit, where the octree sweep is exact to round-off.
-  Validation anchor 3 is therefore stated **per family** below, and the
+  Verification invariant 3 is therefore stated **per family** below, and the
   unigrid-vs-march gap is pinned as an h-independent band.
 * **Convergence of the iteration is a precondition**, not an afterthought: a
   rung solved to a loose tolerance measures its iteration error, and the
@@ -425,9 +425,9 @@ def lambda_solved(grid, kappa):
     return res
 
 
-def test_anchor3_pure_absorber_holds_per_family():
+def test_invariant3_pure_absorber_holds_per_family():
     """
-    AGENTS.md validation anchor 3 (`kappa_s = 0`, `B = 0` -> transmittance
+    AGENTS.md verification invariant 3 (`kappa_s = 0`, `B = 0` -> transmittance
     = `exp(-tau)` along *every* ray), stated **per transport family** — the
     ladder probes showed it is family-dependent, and the plan pins it that
     way (finding F11).
@@ -490,7 +490,7 @@ def test_anchor3_pure_absorber_holds_per_family():
                       f"unigrid chain vs analytic exp(-tau), kappa={kappa} (rms)")
         assert_banded(dev_max, 0.1, 0.55,
                       f"unigrid chain vs analytic exp(-tau), kappa={kappa} (max)")
-        print(f"anchor 3, kappa={kappa}: octree "
+        print(f"invariant 3, kappa={kappa}: octree "
               f"{rel_max_dev(res_o['I'], Iana_o):.1e}, march "
               f"{rel_max_dev(march['I'], Iana_u):.1e}, chain rms {dev_rms:.3e}"
               f" max {dev_max:.3e}")

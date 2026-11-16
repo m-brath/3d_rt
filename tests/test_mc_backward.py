@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MC phase M3 anchors (plan/mc-plan.md section 7): backward (adjoint) detector
+MC phase M3 invariants (plan/mc-plan.md section 7): backward (adjoint) detector
 MC — radiance at a detector from walks launched backwards from it.
 
   1. pure absorber + thermal B + bottom inflow, exact-direction point
@@ -21,7 +21,7 @@ MC — radiance at a detector from walks launched backwards from it.
      varying-kappa slab)
   6. octree walk runs and agrees with the SC octree field
   7. guards (ground BC, detector spec) + traceability keys
-  8. (M5) closed-form single-scatter anchor at omega -> 0 on the octree
+  8. (M5) closed-form single-scatter invariant at omega -> 0 on the octree
      slab: the exact-HG walk against the deterministic integral of the
      first-scatter series — the walk's boundary-incidence path verified
      independent of any SC quadrature (SC-42 itself is off by ~15% on
@@ -313,13 +313,13 @@ def test_backward_guards_and_traceability():
 
 
 # --------------------------------------------------------------------------
-# 8: (M5) closed-form single-scatter anchor, omega -> 0, exact HG
+# 8: (M5) closed-form single-scatter invariant, omega -> 0, exact HG
 # --------------------------------------------------------------------------
 
 
 def test_backward_single_scatter_closed_form_octree():
     """omega = 0.01 slab, vertical detector: first-order scattering integral
-    evaluated deterministically vs the adjoint walk.  Anchors the walk's
+    evaluated deterministically vs the adjoint walk.  Invariants the walk's
     boundary-incidence path against ANALYSIS (no SC quadrature involved);
     the same observable carries a ~15% SC-42 quadrature bias (M5 report)."""
     from rt3d.directions import hg

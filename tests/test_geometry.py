@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Phase 0 anchors: cuboid, ray-box intersection, unigrid, DDA march."""
+"""Phase 0 invariants: cuboid, ray-box intersection, unigrid, DDA march."""
 
 import numpy as np
 import pytest

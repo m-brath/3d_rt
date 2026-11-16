@@ -70,7 +70,7 @@ backend: "auto" | "numpy" | "numba" | "kokkos"     (default "auto")
 - `rt3d.transport` dispatch order in auto mode: kokkos -> numba -> NumPy reference.
 - Recorded in every output file alongside `n_refine`.
 - All three paths must pass the existing tests and the five physics validation
-  anchors (AGENTS.md).
+  invariants (AGENTS.md).
 
 ## 6. Validation policy (decision)
 
@@ -80,7 +80,7 @@ achievable** (different transcendental implementations, different reduction orde
 - Kokkos-**OpenMP** path: keep near-bitwise agreement with the numba path.
 - Kokkos-**CUDA/SYCL** paths: `np.allclose` with explicit tight tolerance
   (rtol 1e-12, atol scaled per quantity) against the NumPy reference in the tests.
-- Anchor 3 (`exp(-tau)` transmittance) must hold to the same tolerance on every
+- Invariant 3 (`exp(-tau)` transmittance) must hold to the same tolerance on every
   backend.
 
 ## 7. Phases

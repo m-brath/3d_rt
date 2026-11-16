@@ -213,7 +213,7 @@ class track_tally(object):
 def heating_rate(kappa_a, B, J):
     """
     Net radiative heating rate ``4 pi kappa_a (B - J)`` — the emission/
-    absorption side of validation anchor 4 (``div F`` equals this for a
+    absorption side of verification invariant 4 (``div F`` equals this for a
     converged field).
     """
     return 4.0 * np.pi * np.asarray(kappa_a, dtype=float) * (

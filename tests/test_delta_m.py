@@ -12,7 +12,7 @@ iteration gain stays < 1 for all omega < 1.
 Solver level: delta_M = 1/2 must reproduce the delta_M = 0 converged solution
 up to the short-characteristics quadrature error of the explicit -g**M I term
 (percent-level on these coarse slabs, shrinking with grid refinement),
-converge in far fewer iterations at large g, and keep validation anchors 3
+converge in far fewer iterations at large g, and keep verification invariants 3
 (Beer-Lambert with the *physical* kappa_e) and 4 (div F = heating rate).
 """
 
@@ -98,7 +98,7 @@ def test_operator_delta_extinction():
     g_cells = np.array([0.0, 0.5, 0.9])
     assert np.allclose(delta_extinction(kappa_e, kappa_s, g_cells, 1),
                        kappa_e - kappa_s * g_cells)
-    # pure absorption: extinction exactly unchanged (anchor 3 with delta on)
+    # pure absorption: extinction exactly unchanged (invariant 3 with delta on)
     assert np.allclose(delta_extinction(kappa_e, np.zeros_like(kappa_e), 0.95, 2),
                        kappa_e)
     # vacuum guard: kappa_e = 0 stays 0 for any g
@@ -124,7 +124,7 @@ def test_operator_hg_delta_matrices_validation(bad):
 
 @pytest.mark.parametrize("M", [1, 2])
 def test_rhs_source_exactness_scalar_g(M):
-    """Core correctness anchor: the delta-M transport RHS equals the
+    """Core correctness invariant: the delta-M transport RHS equals the
     undeltaed one elementwise,
     (1 - omega g**M) S_delta + omega g**M I == S_undeltaed."""
     rng = np.random.default_rng(23)
@@ -216,8 +216,8 @@ def test_solver_acceleration_delta_M1():
     assert res1["n_iter"] < 0.5 * res0["n_iter"]
 
 
-def test_anchor3_transmittance_delta_on():
-    """Validation anchor 3 with delta on: kappa_s = 0, B = 0, top_I = 1,
+def test_invariant3_transmittance_delta_on():
+    """Verification invariant 3 with delta on: kappa_s = 0, B = 0, top_I = 1,
     g = 0.9, delta_M = 1.  Because only the scattering part of the
     extinction is scaled (kappa_e_delta = kappa_e - kappa_s * g = kappa_e)
     and the explicit -omega * g * I term vanishes for omega = 0, the delta-on
@@ -246,8 +246,8 @@ def test_anchor3_transmittance_delta_on():
         assert np.allclose(res["I"][:, d], np.exp(-path), atol=1e-2)
 
 
-def test_anchor4_div_F_heating_delta_on():
-    """Validation anchor 4 with delta on: absorbing + scattering slab
+def test_invariant4_div_F_heating_delta_on():
+    """Verification invariant 4 with delta on: absorbing + scattering slab
     (kappa_e = 1, omega = 0.9, g = 0.9) with smooth nonzero B and a
     Lambertian ground; div F = 4 pi kappa_a (B - J) pointwise in the
     interior, same finite-difference tolerance as tests/test_ground.py."""

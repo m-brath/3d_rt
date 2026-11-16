@@ -52,7 +52,7 @@ the current node; bucket rays by current node so gathers touch only the
 active subset.
 
 **Validation:** segment lists (or fused tau/contrib) bit-comparable to the
-reference march on the phase-3/5 octree tests; anchor 3
+reference march on the phase-3/5 octree tests; invariant 3
 (`kappa_s = 0, B = 0 → exp(-tau)`).
 
 ## 3. P2 — segment-array size and sweep fusion
@@ -132,7 +132,7 @@ g ≤ 0.95 at 1e-6. Keep the bucket path as reference; switch by option.
 ## 10. Validation gates (all steps)
 
 - Full `pytest tests/` suite green after each step.
-- Physics anchors of AGENTS.md: sum(w)=4π; HG ∫ΦdΩ=1; exp(−tau) transmittance;
+- Physics invariants of AGENTS.md: sum(w)=4π; HG ∫ΦdΩ=1; exp(−tau) transmittance;
   div F = heating; octree → unigrid convergence on the Gaussian cloud.
 - J-field bit/close comparison against stored `compare_transport` results
   (same seeds/settings) — optimization must not change converged solutions

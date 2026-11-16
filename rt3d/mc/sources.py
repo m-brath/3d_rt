@@ -6,7 +6,7 @@ M0 delivers the **HG inverse-CDF scatter sampler**: continuous Henyey-
 Greenstein direction sampling with no quadrature and no delta-M (MC
 transport is exact in angle; the icosahedral grid enters only as tally
 binning).  The sampler must reproduce the `hg_matrix` quadrature moments
-to quadrature accuracy — the companion of validation anchor 2, asserted
+to quadrature accuracy — the companion of verification invariant 2, asserted
 in tests/test_mc_sources.py.
 
 HG inverse-CDF (with u ~ U(0,1), -1 < g < 1):

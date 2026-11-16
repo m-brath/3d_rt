@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-MC phase M0 anchors (plan/mc-plan.md section 7): Woodcock flight sampler,
+MC phase M0 invariants (plan/mc-plan.md section 7): Woodcock flight sampler,
 null-collision event decision, cell-vs-global mode equivalence, and DDA
 walkers identical to the SC marches.
 
   1. walk_lattice / walk_octree segment records identical to
      march_lattice / march_octree (periodic wrap + ground entry)
   2. kappa_s = 0, B = 0: MC beam transmittance == exp(-tau) along every
-     ray (validation anchor 3 companion), on unigrid and octree, in both
+     ray (verification invariant 3 companion), on unigrid and octree, in both
      majorant modes
   3. cell mode (zero nulls) and global mode (real null collisions) agree
      statistically within combined 2 sigma
@@ -62,7 +62,7 @@ def cloud_octree():
 
 def _transmittance_stats(grid, box, kappa_e, dg, n_photons, seed, octree=False):
     """
-    Transmittance anchor: beam photons seeded uniformly on the top face,
+    Transmittance invariant: beam photons seeded uniformly on the top face,
     per-ordinate analytic tau from the exact DDA walk, observed survival
     fraction vs. sum(exp(-tau)) with binomial error.
     """
@@ -195,19 +195,19 @@ def test_walk_octree_matches_march_octree(cloud_octree):
 
 
 # =============================================================================
-# transmittance anchor 3 companion, both grids, both majorant modes
+# transmittance invariant 3 companion, both grids, both majorant modes
 # =============================================================================
 
 
-def test_transmittance_anchor_unigrid(box3d):
+def test_transmittance_invariant_unigrid(box3d):
     """kappa_s = 0: MC survival == exp(-tau) per ray, cell and global mode."""
     grid, box, kappa_e = box3d
     dg = icosahedric_grid(n_refine=1)
     _transmittance_stats(grid, box, kappa_e, dg, n_photons=3000, seed=101)
 
 
-def test_transmittance_anchor_octree(cloud_octree):
-    """Same anchor on the octree (global mode crosses vacuum nulls there)."""
+def test_transmittance_invariant_octree(cloud_octree):
+    """Same invariant on the octree (global mode crosses vacuum nulls there)."""
     oct, box = cloud_octree
     dg = icosahedric_grid(n_refine=1)
     _transmittance_stats(oct, box, oct.kappa_e, dg, n_photons=2000, seed=202,

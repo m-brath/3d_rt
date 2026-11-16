@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 T4 of the solver-matrix plan (plan/solver-test-matrix-plan.md section 3):
-**global physics closures per family** -- AGENTS.md anchor 4, made
+**global physics closures per family** -- AGENTS.md invariant 4, made
 octree-capable by plan section 8 (closes finding F4: `energy_balance` used
 to raise ``AttributeError`` on an octree).
 
@@ -197,7 +197,7 @@ def test_face_powers_analytic_linear_flux(grid_fixture, request):
 
 
 # =============================================================================
-# 2. conservative medium: the converging anchor (F7)
+# 2. conservative medium: the converging invariant (F7)
 # =============================================================================
 
 @pytest.mark.parametrize("label,grid_factory", [
@@ -406,7 +406,7 @@ def test_closure_absorbing_octree_band(grid_factory, label):
 
 
 # =============================================================================
-# 4b. anchor-4 closure on the all-sky GROUND case (plan section 11 step 7)
+# 4b. invariant-4 closure on the all-sky GROUND case (plan section 11 step 7)
 # =============================================================================
 # With bc.ground the bottom face carries the emitted + reflected part of the
 # field (`rt3d/diagnostics.energy_balance` counts the full net F_z through the
@@ -565,7 +565,7 @@ def test_mc_stage2_closure_reproduces_sc(oct2):
 
 
 # =============================================================================
-# 6. local anchor: div F vs heating rate, per cell, on both grids
+# 6. local invariant: div F vs heating rate, per cell, on both grids
 # =============================================================================
 
 def test_flux_divergence_octree_local(u24, oct2):
@@ -578,7 +578,7 @@ def test_flux_divergence_octree_local(u24, oct2):
     (octree d2, max 1.03) -- the new octree stencil (face-probe differences
     between neighbour leaf centers) is the same order as the unigrid
     central-difference stencil, a factor ~2 worse at h0 = 1.25 m.  Pinned as
-    a band; the global closures above are the sharp version of this anchor.
+    a band; the global closures above are the sharp version of this invariant.
     """
     dg = direction_grid(1)
     res_u = _conservative_solve(u24)

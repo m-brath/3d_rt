@@ -24,10 +24,10 @@ Comparison conventions (M2/M3 decision log, re-confirmed here):
     differs from SC-42 by SC's own angular-quadrature error (several % in
     scattering-dominated boundary fields; the octree-slab angular
     convergence SC-42/162/642 and the omega -> 0 closed-form single-
-    scatter anchor below place the walk, not the walk's statistics);
+    scatter invariant below place the walk, not the walk's statistics);
   * unigrid SC default transport='chain' adds a lattice-stencil path error,
     so node-level MC-vs-SC differencing is done on the octree only; the
-    unigrid slab carries the GLOBAL chain closures (anchor 4).
+    unigrid slab carries the GLOBAL chain closures (invariant 4).
 
 Report: tables on stdout (mirrored to plot/mc_compare.txt) plus the figure
 plot/mc_compare.png.  Run from the repo root:
@@ -77,7 +77,7 @@ def hflux(I_nodes, mu):
     return float(dg.weights[up_idx] @ (mu * np.asarray(I_nodes)))
 
 
-# %% closed-form anchor: omega -> 0 single-scatter, exact-HG walk
+# %% closed-form invariant: omega -> 0 single-scatter, exact-HG walk
 say("=" * 74)
 say("MC phase M5 integration report — SC vs MC-A(stage1+stage2) vs MC-B")
 say(f"direction grid: icosahedral n_refine = {dg.n_refine}, N_dir = "
@@ -110,7 +110,7 @@ rb = backward_detector_mc(oct_s, kel, ksl, np.zeros(oct_s.n_leaf),
                           {"point": pt_sl, "omega0": np.array([0.0, 0.0, 1.0]),
                            "cone": 0.0, "n_seeds": 400_000}, g=g_sl,
                           periodic_box=sbox, n_batches=50, seed=92, jit=True)
-say("closed-form anchor (octree slab h=0.25, omega = 0.01, g = 0.3, "
+say("closed-form invariant (octree slab h=0.25, omega = 0.01, g = 0.3, "
     "vertical node 0.125 below top):")
 say(f"  analytic single-scatter I = {I_ana:.6f}   "
     f"adjoint walk {rb['I']:.6f} +- {rb['sigma_I']:.6f}  "
@@ -152,7 +152,7 @@ say(f"  adjoint walk {F_b_sl:.5f} +- {sF_b_sl:.5f} ({100*(F_b_sl-F_sc_sl[3])/F_s
     "in scattering-dominated boundary fields")
 say()
 
-# %% slab (unigrid): GLOBAL chain closures A1 -> A2 (anchor 4)
+# %% slab (unigrid): GLOBAL chain closures A1 -> A2 (invariant 4)
 grid, box, hz = slab_grid(4.0, 2.0, nz=16, nxy=4)
 nc = grid.n_cells
 ke = np.full(nc, 2.0)
@@ -209,7 +209,7 @@ say(f"  A1 J vs SC J      : max|dJ|/J_max = "
 say(f"  A2 J(det, own src) vs A1 J: max = "
     f"{np.abs(J2_col - J1_col).max() / Jsc_col.max() * 100:5.2f}%  "
     f"(stage-1 source feeds A2 by design)")
-say("  anchor-4 closure  : net Fz(bottom-top) vs 4 pi kappa_a int J dz "
+say("  invariant-4 closure  : net Fz(bottom-top) vs 4 pi kappa_a int J dz "
     "(2-point face extrapolation, per unit area)")
 for tag, J, F in (("SC      ", sc_s["J"], sc_s["F"]),
                   ("MC A1   ", a1_s["J"], a1_s["F"]),
@@ -308,12 +308,12 @@ say(f"  source-model term: det(isotropic omega*J from A1) vs SC I: "
     f"rms {np.sqrt(np.mean((a2_c_det['I'] - sc_c['I']) ** 2)) / rms_I * 100:.1f}% "
     f"of rms(I)  (O(g) anisotropy, NOT a statistic)")
 
-# anchor-4 closure on face leaves
+# invariant-4 closure on face leaves
 half = oct_.half
 top_m = np.abs(oct_.centers[:, 2] + half - cbox.z1) < 1e-9
 bot_m = np.abs(oct_.centers[:, 2] - half - cbox.z0) < 1e-9
 assert abs(np.sum((2 * half[top_m]) ** 2) - cbox.Lx * cbox.Ly) < 1e-6
-say("  anchor-4 closure (cell-center Fz on face leaves — 1st-order "
+say("  invariant-4 closure (cell-center Fz on face leaves — 1st-order "
     "boundary extrapolation, cloud-structural):")
 for tag, J, F in (("SC      ", sc_c["J"], sc_c["F"]),
                   ("MC A1   ", a1_c["J"], a1_c["F"]),
@@ -353,7 +353,7 @@ say(f"  pixel hemispheric F_up: SC-42 {F_sc_c:.5f} "
     f"{100*(F_b_c-F_ref2)/F_ref2:+.2f}% vs SC-162)")
 say()
 say("chain reading: A1 -> A2 closes within stage-2 noise against its own "
-    "zero-noise sweep; global anchor-4 closure agrees across families to "
+    "zero-noise sweep; global invariant-4 closure agrees across families to "
     "~2%; the adjoint B is exact-HG and matches the SC angular-converged "
     "reference at the pixel; the isotropic omega*J stage-2 source (plan "
     "sketch) is an O(g) model term at node level, not a statistic.")
@@ -381,7 +381,7 @@ for J, F in ((sc_s["J"], sc_s["F"]), (a1_s["J"], a1_s["F"]),
 ax.bar(tags, errs, color=["0.4", "C0", "C3"])
 ax.axhline(0.0, color="k", lw=0.8)
 ax.set_ylabel("closure rel err  %")
-ax.set_title("slab anchor-4 closure over the chain")
+ax.set_title("slab invariant-4 closure over the chain")
 
 ax = axes[1, 0]
 order = np.argsort(mu_up)

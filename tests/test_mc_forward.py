@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MC phase M1 anchors (plan/mc-plan.md section 7): stage-1 mean intensity
+MC phase M1 invariants (plan/mc-plan.md section 7): stage-1 mean intensity
 ``J`` by both MC variants against the phase-2 references.
 
   1. 1D slab (tau=5, g=0, omega in {0.5, 0.9}): MC ``J(z)`` matches the 1D
@@ -11,7 +11,7 @@ MC phase M1 anchors (plan/mc-plan.md section 7): stage-1 mean intensity
      other within combined 2 sigma on the slab and on the gaussian cloud
   3. Ng acceleration (crn=True) needs far fewer iterations than plain LI
      at omega = 0.9 and lands on the same source
-  4. global energy closure (validation anchor 4): net downward face flux ==
+  4. global energy closure (verification invariant 4): net downward face flux ==
      total absorption 4 pi kappa_a int J dV
   5. direct beam, pure absorber: the explicit variant's unscattered-beam
      tally J_direct matches F0 exp(-tau_b) / 4 pi analytically
@@ -22,7 +22,7 @@ MC phase M1 anchors (plan/mc-plan.md section 7): stage-1 mean intensity
      with each other statistically
   8. traceability fields + unimplemented-feature guards
 
-MC phase M2 anchors (plan/mc-plan.md section 7): stage-2 radiance
+MC phase M2 invariants (plan/mc-plan.md section 7): stage-2 radiance
 ``I(cell, ordinate)`` of a fixed source on the SC ray set:
 
   9.  deterministic estimator == analytic line integral on the uniform slab,
@@ -188,7 +188,7 @@ def test_crn_requires_uniform_birth():
 
 
 # --------------------------------------------------------------------------
-# 4: global energy closure (anchor 4 companion)
+# 4: global energy closure (invariant 4 companion)
 # --------------------------------------------------------------------------
 
 
@@ -197,7 +197,7 @@ def test_global_energy_closure_slab():
     Total absorption 4 pi kappa_a int J dA dz must equal the net downward
     flux Fz(top face) - Fz(bottom face) (per unit area) — convergence of the
     field enters through J, consistency of the track-length flux tally
-    through F, so this closes anchor 4 for MC stage 1.
+    through F, so this closes invariant 4 for MC stage 1.
     """
     grid, box, hz, col = _slab()
     omega = 0.5

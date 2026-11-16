@@ -45,12 +45,12 @@ outputs, used to bound the reference's own error): `tau_max 0.25, depth 7`
 
 | tier | file | asserts | scale |
 |---|---|---|---|
-| T0 | `test_matrix_anchors.py` | AGENTS.md anchors 1–3 per variant (direction weights, HG normalization incl. MC samplers, Beer-Lambert on identical rays for chain/sc/octree/jit/numpy/MC cell+global/adjoint/beam-τ) | 43 tests, ~2 s |
+| T0 | `test_matrix_invariants.py` | AGENTS.md invariants 1–3 per variant (direction weights, HG normalization incl. MC samplers, Beer-Lambert on identical rays for chain/sc/octree/jit/numpy/MC cell+global/adjoint/beam-τ) | 43 tests, ~2 s |
 | T1 | `test_matrix_equivalence.py` | deterministic variant equivalence: jit vs numpy and n_jobs bit-identical; δ-M 1/2 vs 0 bands; Ng fixed point; chain vs sc band; ground/beam/periodic structure; guards | 20 tests, ~30 s |
 | T2 | `test_matrix_crossfamily.py` | zero-noise identity: MC deterministic line integral fed the SC's own source **≡** the SC octree sweep (1.2e-12 max, δ-M 0/1/2, beam on/off, both majorant modes, jit on/off), negative control (physical κ under δ-M fails by ≥ 1e-2), **ground stage-2 identity (F13 guard)**, unigrid pinned as band (F11), positive M6 ground smoke tests for all three MC entry points | 13 tests, ~2 min |
 | T3 | `test_matrix_statistics.py` | statistical consistency under the noise model (§6 of the plan): A1 explicit vs λ, A1 vs SC, seed-pair pooled z, next-flight F3 noise masking, adjoint masked z, **all-sky ground MC vs SC cross-family** (section 4) | 15 tests, ~3 min |
-| T4 | `test_matrix_closure.py` | anchor 4 per family with the octree-capable closure: face powers vs `∫4πκ_a(B−J)dV`, analytic-integral identities, the ground-case closure (bottom-face power includes reflected + emitted parts), cross-family absorbed power (SC-42 vs SC-162 vs MC A1) | 21 tests, ~4 min |
-| T5 | `test_matrix_ladder.py` | refinement ladders per family, reference ranking, order fits, per-family anchor-3, MC `N^-1/2` by seed splitting | 10 tests, ~15 min |
+| T4 | `test_matrix_closure.py` | invariant 4 per family with the octree-capable closure: face powers vs `∫4πκ_a(B−J)dV`, analytic-integral identities, the ground-case closure (bottom-face power includes reflected + emitted parts), cross-family absorbed power (SC-42 vs SC-162 vs MC A1) | 21 tests, ~4 min |
+| T5 | `test_matrix_ladder.py` | refinement ladders per family, reference ranking, order fits, per-family invariant-3, MC `N^-1/2` by seed splitting | 10 tests, ~15 min |
 | M6 | `test_mc_ground.py` | the MC ground law against closed forms: vacuum emission, Beer-Lambert + albedo continuum, adjoint cones, reflected-beam populations, stage-2 vs SC, determinism pairings | 13 tests, ~25 s |
 
 ## 3. Pinned bands (measured regression thresholds)
@@ -85,7 +85,7 @@ absorbed power MC − SC ∈ [−0.05, 0] % (measured **−2.15 %**), leaf-mean 
 ∈ [−0.04, 0] (−1.69 %), per-cell rms z vs the SC column ∈ [0.5, 1.2]
 (0.795, mean −0.30 — a coherent quarter-σ offset, part of it F14).
 
-**Closures (T4).** Relative anchor-4 residual: conservative test medium
+**Closures (T4).** Relative invariant-4 residual: conservative test medium
 3.3e-5 (u24) → 6.6e-7 (u48), −1.4e-3 (octree h0 1.25) → −1.3e-4 (h0 0.625);
 matrix case −1.0e-2 (oct2) / −9.7e-3 (oct3), unigrid +4.2e-2 (chain, F11)
 and −2.2e-1 (sc stencil); **ground case** −3.5e-3 (oct2) / −2.2e-3 (oct3) /
@@ -130,7 +130,7 @@ first order. MC power seed-split error ∝ `N^-0.49`.
   transport error (~12 % rms vs analytic `exp(-tau)` in the pure-absorber
   limit; octree/march exact to 1e-15). The unigrid family plateaus ~4 %
   rms J from the octree reference at every resolution. Pinned as a finding
-  (solver unchanged); anchor 3 is asserted **per family**.
+  (solver unchanged); invariant 3 is asserted **per family**.
 * **F12** (fixed 2026-11-16): the MC segment marcher filled face-crossing
   times into `np.empty`, leaving `da == 0` entries (beam `dy = 0` exactly,
   z-poles) as uninitialized heap garbage → identical seeds gave different

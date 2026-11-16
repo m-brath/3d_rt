@@ -7,7 +7,7 @@ sweep, beam + thermal source, kappa_s = 0, against the Beer-Lambert law.
   1. beam:      I_beam = F0 * exp(-tau_b), tau_b analytic
   2. diffuse:   I(Omega, x) = I_entry * exp(-kappa * path), analytic path
                 length along each characteristic, checked for every ordinate
-                and every cell (validation anchor 3)
+                and every cell (verification invariant 3)
   3. isothermal: kappa_s = 0, B = const, I_in = B on top and bottom
                 -> I = B exactly everywhere (transport + source balance)
 

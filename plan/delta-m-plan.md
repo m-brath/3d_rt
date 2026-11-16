@@ -22,7 +22,7 @@ kappa_e_delta    = kappa_e - kappa_s * g^M      # used by ALL diffuse transport
 applies to scattering alone, so keeping absorption unscaled
 
 - leaves pure absorption (`kappa_s = 0`) exactly Beer-Lambert — validation
-  anchor 3 holds with delta on (full-extinction scaling `kappa_e (1 - g^M)`
+  invariant 3 holds with delta on (full-extinction scaling `kappa_e (1 - g^M)`
   breaks it at O(tau_cell) via the explicit term), and
 - keeps the explicit term's LI gain `omega g^M (1 - g)/(1 - omega g^M) < 1`
   for all `omega < 1` — full-extinction scaling has isotropic-mode gain
@@ -43,7 +43,7 @@ S_delta = [ (1-omega) B
 (per-cell factors — `omega` varies by cell). Sanity checks:
 - isotropic field: `kappa_e (S - I) = -kappa_a I` (correct absorption),
 - `kappa_s = 0`: `kappa_e_delta = kappa_e` and the explicit term vanishes —
-  anchor 3 is *exact*, not approximate.
+  invariant 3 is *exact*, not approximate.
 
 `M = 1` (delta-Eddington): the moment sum is just `J` (already computed by
 `mean_intensity`). `M = 2` adds `3 Omega.F / 4pi` (already computed by
@@ -107,12 +107,12 @@ so `Phi_w = Phi_w_delta + moments` exactly. Consequences:
 ## 4. Tests (`tests/test_delta_m.py`)
 
 1. **Equivalence**: slab, `g = 0.8/0.9`, `omega = 0.5/0.9`: `delta_M=1` vs off ->
-   same converged `J` (tight tolerance). Correctness anchor.
+   same converged `J` (tight tolerance). Correctness invariant.
 2. **Acceleration**: slab `g = 0.95`, `omega = 0.9`: iteration count with
    `delta_M=1` far below plain LI.
-3. **Anchor 3 with delta on**: `kappa_s = 0` -> transmittance `exp(-tau)` with
+3. **Invariant 3 with delta on**: `kappa_s = 0` -> transmittance `exp(-tau)` with
    physical `kappa_e` (the `-g^M I` term must restore it).
-4. **Anchor 4**: `div F` = heating rate on a delta-on run.
+4. **Invariant 4**: `div F` = heating rate on a delta-on run.
 5. `M=2` equivalence + moment-operator unit test (`P_hat_0,w` row sums = 1,
    `P_hat_1,w` row sums ≈ 0).
 
@@ -145,7 +145,7 @@ Dependency DAG and schedule:
 | 1 | `general` A — **core operators** | `rt3d/directions.py` (`hg_delta_matrices`), `rt3d/source.py` (`delta_extinction`, delta path in `scattering_source`, `beam_scattering_source` scale factor); runs its own quick sanity checks | alone |
 | 2a | `general` B — **solver integration** | `rt3d/solver.py` `delta_M` option: `kappa_e_delta` into all sweeps + beam tau + ground beam irradiance, result dict keys; runner-script `--delta-M` flags | in parallel with 2b |
 | 2b | `general` C — **tests** | `tests/test_delta_m.py` (all five tests of section 4); writes against A's frozen API | in parallel with 2a |
-| 3 | main agent (inline) | run the full pytest suite, verify anchors 1–4, measure iteration counts delta-on vs off on the slab and the Gaussian cloud | — |
+| 3 | main agent (inline) | run the full pytest suite, verify invariants 1–4, measure iteration counts delta-on vs off on the slab and the Gaussian cloud | — |
 | 4 | `general` D — **docs** | `plan/plan.md` decisions-log entry (with the measured numbers from step 3), `MANUAL.md` `delta_M` section | alone, after 3 |
 
 Rules of engagement:

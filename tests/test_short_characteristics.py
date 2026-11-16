@@ -253,7 +253,7 @@ def test_sc_matches_naive_recursion_nonperiodic(box3d):
 
 
 def test_transmittance_staircase_error():
-    """kappa_s = 0, B = 0 vs. the true-ray exp(-tau) (validation anchor 3
+    """kappa_s = 0, B = 0 vs. the true-ray exp(-tau) (verification invariant 3
     is exact only for true-ray schemes - documented in plan/plan-sc-
     unigrid.md section 3/5):  z-entry ordinates are exact to machine
     precision (gap + target segment tile the true path), oblique
@@ -287,7 +287,7 @@ def test_transmittance_staircase_error():
     za = np.array(
         [sc_stencil(o, np.ones(3))["a"] for o in dg.directions if o[2] < 0]
     )
-    # z-entry ordinates: exact (anchor 3 holds)
+    # z-entry ordinates: exact (invariant 3 holds)
     assert np.allclose(e8[za == 2], 0.0, atol=1e-12)
     # oblique ordinates: bounded stencil path error, stable under
     # refinement (documented trade-off, not a discretization to be

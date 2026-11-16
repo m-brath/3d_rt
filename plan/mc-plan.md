@@ -29,8 +29,8 @@ numba sampler 4.5-7x, statistical equivalence; wall-time table
 `scripts/mc_phase4_walltimes.py`). M5 green (integration report
 `plot/mc_compare.png` + `plot/mc_compare.txt`: stage-2 vs SC exact-sweep
 identity 9.6e-11 and rms z ~1 statistics on the SC's own source, chain A2
-noise vs own zero-noise sweep rms z 1.12, anchor-4 closure SC −0.62%/A1
-−1.99%/A2 −0.85% on the cloud, closed-form single-scatter anchor locks the
+noise vs own zero-noise sweep rms z 1.12, invariant-4 closure SC −0.62%/A1
+−1.99%/A2 −0.85% on the cloud, closed-form single-scatter invariant locks the
 adjoint walk as exact-HG; the isotropic omega*J stage-2 source and SC's
 pixel-level angular quadrature are separated as model terms). Adds a second solver family next
 to the short-characteristics solver (`rt3d/`, phases 0-6 done). This plan
@@ -71,7 +71,7 @@ verified by `tests/test_mc_forward.py` and `scripts/mc_forward_slab.py`):
   unscattered beam track separately as `J_direct` (matches `F0 e^{-tau_b}/4pi`).
 - **Stage 1 has no direction grid / `n_refine`** — no angular quadrature in
   MC stage 1; the icosahedral grid enters with stage-2 tally binning (M2).
-- **Anchor 4 for MC** is checked globally (net downward face flux vs
+- **Invariant 4 for MC** is checked globally (net downward face flux vs
   `4 pi kappa_a int J dV`): pointwise `div F` vs heating is truncation-
   dominated at the topmost slab interfaces for *both* solver families
   (MC ~ 12-18%, SC ~ 8% of peak heating), while the global closure is
@@ -128,7 +128,7 @@ validated by `tests/test_mc_backward.py` and `scripts/mc_backward.py`):
   and cap sampling make the output the aperture/cone-**averaged radiance**
   (no extra `Delta-omega` factor).  `backward_all_sky` runs one equal-area
   icosahedral cap per upward ordinate (caps tile the hemisphere).
-- Validation anchors: closed-form Beer-Lambert slab (3 sigma), closed
+- Verification invariants: closed-form Beer-Lambert slab (3 sigma), closed
   scattering slab and beam slab vs converged `lambda_iteration` I per
   upward ordinate (2 sigma + 8%), octree slab, global-mode nulls, all-sky
   consistency at **exact node directions** (`cone_scale = 0` default:
@@ -176,7 +176,7 @@ M4 implementation notes (variance reduction + numba fast path):
   stream is **not** the NumPy PCG64 stream: equivalence is statistical, not
   per-ray — collision/event/exit fractions and mean exit paths agree within
   4 sigma on unigrid + octree, cell + global, and the plan's transmittance
-  anchor (anchor 3) holds **on the jit path** (4 sigma).  A walker invariant
+  invariant (invariant 3) holds **on the jit path** (4 sigma).  A walker invariant
   that the reference enforces and the kernels must match: the position stays
   exactly on a crossed face and the eps-step along `d` is a *locate probe
   only* — advancing the position by the probe truncates backward exit
@@ -213,17 +213,17 @@ M5 implementation notes (integration pass, `scripts/mc_compare.py`):
 - **Honest findings logged** (see plan/plan.md M5 rows): the isotropic
   omega*J stage-2 source is an O(g) model term at node level (+23.5% pixel
   flux on the cloud) not a statistic; the adjoint walk is exact-HG and is
-  anchored against the closed-form single-scatter integral (z=+1.0, test
+  invarianted against the closed-form single-scatter integral (z=+1.0, test
   locked), while SC pixel fluxes carry a few % angular-quadrature bias in
   B=0 scattering-dominated boundary fields (SC-42/162/642 = 0.26391 /
   0.25662 / 0.25623 vs walk 0.24904+-0.00070 on the octree slab) — which
-  also re-explains part of M3's -1.5% slab flux closure. Global anchor-4
+  also re-explains part of M3's -1.5% slab flux closure. Global invariant-4
   closures agree across families to ~2% (slab: SC -6.96% / A1 -2.76% /
   A2 -6.38% with the 2-point face extrapolation; cloud face leaves: SC
   -0.62% / A1 -1.99% / A2 -0.85%, ~1% structural).
 - Plumbings added for the pass: `radiance_from_source(jit=True)` (stage-2
   fast path, test-locked), output keys `jit` / `implicit_capture` /
-  `roulette_floor` on stage 2 and the detectors, new backward anchor test
+  `roulette_floor` on stage 2 and the detectors, new backward invariant test
   (single-scatter closed form, `tests/test_mc_backward.py` #9).
 
 Decisions taken with the user up front:
@@ -259,7 +259,7 @@ MC identities used throughout:
   With `u ~ U(0,1)`: for `g != 0`, `q = 2 g u / (1 - g^2) + 1/(1 + g)`,
   `cos(theta) = (1 + g^2 - 1/q^2) / (2 g)`; azimuth uniform. Limit `g -> 0`:
   isotropic (`cos(theta) = 2u - 1`). Must reproduce `hg_matrix` moments to
-  quadrature accuracy (anchor 2 companion test).
+  quadrature accuracy (invariant 2 companion test).
 - **Next-flight (collision) estimator**: a collision sampled with density
   `kappa_e e^{-tau(s)}` at `r_c` contributes `S(r_c) / kappa_e(r_c)` to the line
   integral of `S e^{-tau}` to *every downstream point* of that ray
@@ -286,7 +286,7 @@ The tracker is the shared core of all solvers. One code path, two modes:
   vacuum) and is the reference implementation of the null-collision concept.
 - Both modes share the same event-type decision logic; the unit tests assert that
   cell and global mode agree statistically (same seed, different stream) on the
-  transmittance anchor.
+  transmittance invariant.
 
 Null collisions are also load-bearing in two further places:
 
@@ -338,7 +338,7 @@ Entry point `j_mc(grid, kappa_e, kappa_s, B, bc, g=0.0, stage1=..., ...) -> J, s
   with **common random numbers** (identical photon streams per iteration, fixed
   base seed) so the `Lambda_bar` history pairs see correlated noise; documented as
   experimental, plain-LI is the default for this variant.
-- The two variants must agree within 2 sigma on the slab case (consistency anchor).
+- The two variants must agree within 2 sigma on the slab case (consistency invariant).
 
 ### Stage 2: radiance from the fixed source (`radiance_from_source`)
 
@@ -397,7 +397,7 @@ Entry point `backward_detector_mc(grid, dg, kappa_e, kappa_s, S_total, tau_b, de
   carries its `sigma`.
 - Tallies: `J` per cell (Stage 1); `I[(cell, ordinate)]` (Stage 2); sensor
   radiance per (pixel, cone bin) (Solver B); heating-rate tally
-  `4 pi kappa_a (B - J)` for the energy anchor.
+  `4 pi kappa_a (B - J)` for the energy invariant.
 - Outputs follow the existing traceability rules: `n_refine`, `n_histories`,
   `seed`, `mode`, `stage1`, grid/octree spec recorded in every output file
   (xarray / h5py, same convention as the SC runs).
@@ -417,13 +417,13 @@ rt3d/mc/
   forward.py      j_mc(stage1="explicit"|"lambda"), radiance_from_source(estimator=...)
   backward.py     backward_detector_mc + detector spec, all-sky consistency mode
 scripts/
-  mc_phase0_check.py      anchors: transmittance, HG CDF vs hg_matrix, cell-vs-global mode
+  mc_phase0_check.py      invariants: transmittance, HG CDF vs hg_matrix, cell-vs-global mode
   mc_forward_slab.py      stage 1 both variants vs phase2 slab reference
   mc_forward_cloud.py     stage 1+2 on the gaussian cloud vs lambda_iteration
   mc_backward.py          sensor/all-sky backward runs, efficiency figure
   mc_compare.py           SC vs MC(A-stage2) vs MC(B) differencing report
 tests/
-  test_mc_tracking.py     flight distribution, null mode equivalence, transmittance anchor
+  test_mc_tracking.py     flight distribution, null mode equivalence, transmittance invariant
   test_mc_sources.py      HG CDF vs hg_matrix moments, birth sampling vs analytic rates
   test_mc_forward.py      slab J, energy closure, stage-1 variant agreement
   test_mc_backward.py     top-face consistency vs stage 2, cone-bin efficiency trend
@@ -435,8 +435,8 @@ No new dependencies (numba, numpy, pytest already in `pyarts`).
 
 | # | Deliverable | Validation |
 |---|---|---|
-| M0 | tracker (both grids, both `kappa_max` modes), event decision, HG CDF | `kappa_s=0, B=0`: MC beam transmittance = `exp(-tau)` per ray (anchor 3, 2 sigma); HG samples reproduce `hg_matrix` moments to quadrature accuracy (anchor 2 companion); cell-mode and global-mode (nulls) agree within combined 2 sigma; periodic wrap + ground entry identical to `march_lattice`/`march_octree` segment counts |
-| M1 | Stage 1 `J` both variants | 1D slab `tau=5`, `g=0`, `omega` in {0.5, 0.9}: `J(z)` vs phase2 Chandrasekhar/two-stream reference within 2 sigma; explicit vs lambda variant agree within 2 sigma; heating rate `4 pi kappa_a (B - J)` vs `div F` of the SC reference (anchor 4) |
+| M0 | tracker (both grids, both `kappa_max` modes), event decision, HG CDF | `kappa_s=0, B=0`: MC beam transmittance = `exp(-tau)` per ray (invariant 3, 2 sigma); HG samples reproduce `hg_matrix` moments to quadrature accuracy (invariant 2 companion); cell-mode and global-mode (nulls) agree within combined 2 sigma; periodic wrap + ground entry identical to `march_lattice`/`march_octree` segment counts |
+| M1 | Stage 1 `J` both variants | 1D slab `tau=5`, `g=0`, `omega` in {0.5, 0.9}: `J(z)` vs phase2 Chandrasekhar/two-stream reference within 2 sigma; explicit vs lambda variant agree within 2 sigma; heating rate `4 pi kappa_a (B - J)` vs `div F` of the SC reference (invariant 4) |
 | M2 | Stage 2 radiance on the gaussian cloud | `I(cell, ordinate)` vs converged `lambda_iteration` within 2 sigma per cell (aggregate); measured error bars vs observed deviations (~1/sqrt(N)); deterministic-reference estimator agrees with SC sweep structurally |
 | M3 | Backward MC | top-face all-sky vs Solver A Stage 2 within 2 sigma per cone bin; beam coupling check: `kappa_a = 0` single-scatter regime vs analytic single-scatter beam source |
 | M4 | performance + variance reduction | **done 2026-11-15** — `rt3d/mc/jitmc.py` numba fast path (jit.py pattern, numpy fallback tested); `implicit_capture` + `roulette_floor` on chains, `j_mc` explicit variant and the adjoint walk; wall-time MC vs SC table in `scripts/mc_phase4_walltimes.py` (the MC family wins Stage-2/backward-style queries, SC on J — reported honestly) |

@@ -129,8 +129,8 @@ def test_fused_sweep_ground_bc_matches_reference():
     assert np.allclose(I_jit, I_ref, rtol=1e-9, atol=1e-12)
 
 
-def test_fused_sweep_beer_lambert_anchor3():
-    """kappa_s = 0, S = 0: fused sweep reproduces exp(-tau) (anchor 3)."""
+def test_fused_sweep_beer_lambert_invariant3():
+    """kappa_s = 0, S = 0: fused sweep reproduces exp(-tau) (invariant 3)."""
     dg = icosahedric_grid(n_refine=1)
     box = cuboid(0.0, 2.0, 0.0, 2.0, 0.0, 2.0)
     oct = octree_grid(box, h0=0.5)

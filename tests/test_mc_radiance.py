@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MC phase M2 anchors (plan/mc-plan.md section 7): stage-2 radiance
+MC phase M2 invariants (plan/mc-plan.md section 7): stage-2 radiance
 ``I(cell, ordinate)`` of a fixed source, on the SC ray set (one ray per cell
 center per icosahedral ordinate, marched backwards to the domain entry).
 

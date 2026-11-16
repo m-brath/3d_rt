@@ -196,7 +196,7 @@ def test_single_level_octree_sweep_vs_true_ray():
 
 def test_exact_march_beer_lambert():
     """kappa_s = 0, S = 0, uniform kappa: the exact-march sweep reproduces
-    exp(-kappa * t_e) at machine precision for every ordinate (anchor 3),
+    exp(-kappa * t_e) at machine precision for every ordinate (invariant 3),
     including rays wrapping through periodic side faces."""
     dg = icosahedric_grid(n_refine=1)
     box = cuboid(0.0, 2.0, 0.0, 2.0, 0.0, 2.0)
@@ -278,7 +278,7 @@ def dg_directions_sample():
 
 
 def test_octree_beer_transmittance_vs_uniform_beam():
-    """kappa_s = 0 beam anchor: octree tau_b agrees with the unigrid tau_b
+    """kappa_s = 0 beam invariant: octree tau_b agrees with the unigrid tau_b
     on the same sampled kappa field (both exact along their own rays)."""
     box = cuboid(-5.0, 5.0, -5.0, 5.0, 0.0, 10.0)
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MC phase M4 anchors (plan/mc-plan.md section 2/7): variance reduction —
+MC phase M4 invariants (plan/mc-plan.md section 2/7): variance reduction —
 implicit capture (albedo-weight chains, no absorption termination) plus
 Russian-roulette weight floor, on the forward chains (`track_histories` /
 `j_mc` explicit variant) and the backward adjoint walk.

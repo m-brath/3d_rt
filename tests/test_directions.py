@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Phase 0 anchors: direction grid, solid-angle weights, HG matrix."""
+"""Phase 0 invariants: direction grid, solid-angle weights, HG matrix."""
 
 import numpy as np
 import pytest
@@ -104,7 +104,7 @@ def test_hg_function_normalization_analytic():
 
 
 def test_angular_convergence_slab():
-    """Phase 6 anchor: on a scattering slab the J difference between
+    """Phase 6 invariant: on a scattering slab the J difference between
     consecutive direction levels (42->162->642) must shrink."""
     from rt3d.geometry import cuboid, unigrid
     from rt3d.solver import lambda_iteration

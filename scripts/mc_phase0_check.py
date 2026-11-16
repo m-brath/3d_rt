@@ -6,9 +6,9 @@ null-collision event decision, HG inverse-CDF sampler, DDA walkers.
 
   1. flight distribution + event-decision fractions (sampler units)
   2. HG samples reproduce the hg_matrix quadrature moments to quadrature
-     accuracy (companion of validation anchor 2)
+     accuracy (companion of verification invariant 2)
   3. kappa_s = 0, B = 0: MC beam transmittance == exp(-tau) along every
-     ray (anchor 3), on unigrid AND octree, in cell AND global mode
+     ray (invariant 3), on unigrid AND octree, in cell AND global mode
   4. cell mode (zero nulls) vs global mode (real nulls) agree within
      combined 2 sigma
   5. periodic wrap + ground entry: MC DDA walkers give the same segment
@@ -60,7 +60,7 @@ ev = event_decision(rng.random(400_000), kappa_max,
 frac = np.bincount(ev, minlength=3) / ev.size
 print("event fractions (scatter/absorb/null): %s  expected [0.25 0.25 0.5 ]" % frac)
 
-# %% 2. HG CDF vs hg_matrix moments (anchor 2 companion)
+# %% 2. HG CDF vs hg_matrix moments (invariant 2 companion)
 def _legendre(n, x):
     if n == 0:
         return np.ones_like(x)
@@ -102,7 +102,7 @@ fig.tight_layout()
 fig.savefig("plot/mc_phase0_hg_cdf.png", dpi=150)
 print("figure -> plot/mc_phase0_hg_cdf.png")
 
-# %% 3. transmittance anchor on both grids and in both majorant modes
+# %% 3. transmittance invariant on both grids and in both majorant modes
 def transmittance(grid, box, kappa_e, n_photons, seed, octree=False, ordstride=4):
     """
     Beam photons seeded uniformly on the top face, budget = full column
@@ -159,7 +159,7 @@ oct.balance_21(max_depth=3)
 oct.finalize()
 oct.sample_fields(kappa_e=case["kappa_e"], kappa_s=case["kappa_s"])
 
-print("\nTransmittance anchor 3 (kappa_s = 0): survival z-score vs exp(-tau)")
+print("\nTransmittance invariant 3 (kappa_s = 0): survival z-score vs exp(-tau)")
 t0 = time.time()
 res_u = transmittance(grid, box, kappa_e, n_photons=3000, seed=101)
 res_o = transmittance(oct, case["box"], oct.kappa_e, n_photons=2000, seed=202,

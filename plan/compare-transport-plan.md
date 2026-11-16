@@ -21,7 +21,7 @@ n_iter=60, tol=1e-6)`.
 | 5–6 | octree | octree exact marches (`chain`; `sc` is unigrid-only) | 0 / 1 |
 
 Pairings: chain↔SC isolates the transport-algorithm error on identical cells;
-unigrid↔octree is validation anchor 5; δ-on↔δ-off checks the delta-M
+unigrid↔octree is verification invariant 5; δ-on↔δ-off checks the delta-M
 equivalence claim (same converged solution, fewer iterations at core g≈0.95).
 
 ## 2. Diagnostics
@@ -69,5 +69,5 @@ isosurfaces (toggleable actors in the viewer sidebar):
 
 - `pytest tests/` full suite green (new diagnostics tests included)
 - sanity: δ-on vs δ-off converged J agree (delta-M equivalence), TOA mean F_z
-  matches the manual §11 numbers (−2.52 unigrid), anchor-5 pattern reproduced
+  matches the manual §11 numbers (−2.52 unigrid), invariant-5 pattern reproduced
   (octree vs unigrid J differ at the grazing-ordinate level, not the scheme level)

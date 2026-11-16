@@ -194,7 +194,7 @@ Hard rules when delegating to subagents:
   answer as authoritative context for a new task. Each subagent call must carry all the
   context it needs in its own prompt.
 
-## Physics validation anchors
+## Physics verification invariants
 
 When changing transport, source, or iteration code, at least these must still hold:
 

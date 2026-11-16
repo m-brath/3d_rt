@@ -154,7 +154,7 @@ def _converged_small_run():
 
 
 def test_div_F_equals_heating_rate():
-    """Validation anchor 4: div F = 4 pi kappa_a (B - J) pointwise
+    """Verification invariant 4: div F = 4 pi kappa_a (B - J) pointwise
     (finite-difference accuracy on this coarse slab)."""
     dg, grid, res = _converged_small_run()
     kappa_a = 1.0 - res["omega"]  # kappa_e = 1, kappa_s = omega

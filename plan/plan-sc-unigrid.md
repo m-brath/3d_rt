@@ -123,7 +123,7 @@ New file `rt3d/short_characteristics.py`:
 3. `kappa_s = 0`, `B = 0`: transmittance vs. true `exp(-tau)` — the SC path is a
    staircase and the deviation is **bounded but resolution-independent**: it does
    *not* shrink with h, because the discrete recursion's effective direction is
-   set by the bilinear weights, not by Omega (validation anchor 3 is exact only
+   set by the bilinear weights, not by Omega (verification invariant 3 is exact only
    for true-ray schemes; documented in `docs/sc-transport.md` §12.2/§12.5 and
    pinned by `test_transmittance_staircase_error`; corrected 2026-11-16 after
    the T5 ladder probes measured the same h-independent error in the `chain`

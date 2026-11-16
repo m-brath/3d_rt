@@ -18,7 +18,7 @@ Solvers compared:
 
 MC transport is angle-exact; the MC-vs-reference deviations are statistical
 (batch sigma) plus the reference's own cell discretization.  Error bars are
-2 sigma history-batch bands; energy closure (validation anchor 4) is checked
+2 sigma history-batch bands; energy closure (verification invariant 4) is checked
 globally: net downward face flux vs total absorption 4 pi kappa_a int J dz.
 """
 
@@ -133,7 +133,7 @@ for omega in OMEGAS:
     report("MC explicit        ", col(r_ex["J"]), col(r_ex["sigma_J"]), t_ex,
            J_ref, r_crn)
 
-    # ---- anchor 4: global closure, per unit area ------------------------
+    # ---- invariant 4: global closure, per unit area ------------------------
     for tag, r in (("lambda crn", r_crn), ("explicit", r_ex)):
         J = col(r["J"])
         Fz = col(r["F"])[:, 2]

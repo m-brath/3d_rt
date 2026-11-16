@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Gaussian cloud test case — the `scripts/class_test.py` case expressed as
-callable input fields (validation anchor 5: octree vs uniform grid).
+callable input fields (verification invariant 5: octree vs uniform grid).
 
 Conventions copied from class_test.py:
 

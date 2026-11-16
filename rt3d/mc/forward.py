@@ -374,7 +374,7 @@ def j_mc(
         Flight-length cap (default 100 domain diagonals) guarding the marching
         loop against near-grazing outliers; 'n_truncated' counts the cap hits.
     tally_flux : bool
-        Also tally the flux vector ``F`` (validation anchor 4).
+        Also tally the flux vector ``F`` (verification invariant 4).
     implicit_capture, roulette_floor : M4 variance reduction
         See `rt3d.mc.tracking.track_histories` — albedo-weight chains (no
         absorption termination) and a Russian-roulette weight floor.  Only
@@ -392,7 +392,7 @@ def j_mc(
                             standard error (the plan's acceptance bands are
                             2 sigma)
         'F', 'sigma_F'      (n_cells, 3) flux vector and standard error
-        'heating'           ``4 pi kappa_a (B - J)`` (anchor-4 side)
+        'heating'           ``4 pi kappa_a (B - J)`` (invariant-4 side)
         'history'           relative source change per iteration ("lambda")
         's_max_history'    max |S| per iteration (divergence diagnostics)
         'n_iter', 'converged'
