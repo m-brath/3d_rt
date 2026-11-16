@@ -406,3 +406,13 @@ plot/compare_transport/_solve_cache/
 
 # per-run solve cache of the solver-matrix report (scripts/solver_matrix.py)
 plot/solver_matrix/_solve_cache/
+
+# report build artifacts (LaTeX + own solve cache of report_figures.py)
+report/figures/_cache/
+report/*.aux
+report/*.fdb_latexmk
+report/*.fls
+report/*.log
+report/*.out
+report/*.synctex.gz
+report/*.toc

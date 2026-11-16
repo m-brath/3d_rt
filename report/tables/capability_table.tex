@@ -1,0 +1,14 @@
+\begin{tabular}{@{}llcccccc@{}}
+\toprule
+feature & \multicolumn{3}{c}{SC family} & \multicolumn{3}{c}{MC family} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+ & chain & unigrid SC & octree & A1 stage-1 & A2 stage-2 & adjoint B \\
+\midrule
+thermal emission $B$ & yes & yes & yes & yes & yes & yes \\
+solar beam & yes & yes & yes & yes & yes & yes \\
+Lambertian ground & yes & yes & yes & yes (M6) & yes (ground\_I) & yes (M6) \\
+variable-height ground & n/a$^\dagger$ & n/a$^\dagger$ & n/a$^\dagger$ & n/a$^\dagger$ & n/a$^\dagger$ & n/a$^\dagger$ \\
+angular quadrature & 42--642 & 42--642 & 42--642 & none & binning & exact HG \\
+energy closure (invariant 4) & yes & yes & yes (octree) & n/a ($J$ only) & yes (stage-2 $I$) & n/a (detector) \\
+\bottomrule
+\end{tabular}
