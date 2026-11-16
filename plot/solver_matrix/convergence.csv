@@ -1,0 +1,11 @@
+family,kind,rung_a,rung_b,err,note
+unigrid,Cauchy pair,u12,u24,0.027076853578809082,pairwise rms J
+unigrid,Cauchy pair,u24,u48,0.013474788232829788,pairwise rms J
+unigrid,fitted slope (Cauchy),,,1.0067975026114586,expect ~1 (F11: plateau vs octree stays)
+octree,tau rung vs REF,tau4.0,REF,0.008532077832131576,d5 fixed; tau ladder saturates below tau ~1 (F10)
+octree,tau rung vs REF,tau2.0,REF,0.005855568898141784,d5 fixed; tau ladder saturates below tau ~1 (F10)
+octree,tau rung vs REF,tau1.0,REF,0.004189491232134441,d5 fixed; tau ladder saturates below tau ~1 (F10)
+MC,power seed-std rel err,N=20000,,0.008029388634259529,"explicit, 3 seeds: [232.33472507521287, 233.49824423715683, 229.8529006523367]"
+MC,power seed-std rel err,N=80000,,0.0014013868051724254,"explicit, 3 seeds: [232.07259349929944, 231.7881395867459, 232.4370205647209]"
+MC,power seed-std rel err,N=320000,,0.002906525456693838,"explicit, 3 seeds: [232.33438954505428, 231.2763085595286, 231.08469852443463]"
+MC,fitted slope (power err vs N),,,-0.36649864981375485,expect ~ -0.5

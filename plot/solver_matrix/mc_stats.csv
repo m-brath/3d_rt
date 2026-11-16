@@ -1,0 +1,7 @@
+quantity,mask,n,mean,rms,tail2,tail3,max_abs
+A1 seed pair (J_total),masked,6952,-0.016,0.635,0.0033,0.0000,2.7
+A1 seed pair (J_total),unmasked,6952,-0.016,0.635,0.0033,0.0000,2.7
+A2 next-flight vs det (100 fl.),masked,163797,0.030,1.114,0.0640,0.0115,27.2
+A2 next-flight vs det (100 fl.),unmasked,255382,-0.444,54.938,0.0747,0.0249,22300.6
+B adjoint all-sky leaf 0,masked,21,-0.701,1.619,0.1905,0.0952,3.5
+B adjoint all-sky leaf 1,masked,21,-1.588,2.181,0.2857,0.0952,6.3

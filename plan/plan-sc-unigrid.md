@@ -121,8 +121,13 @@ New file `rt3d/short_characteristics.py`:
 2. Homogeneous medium + constant inflow: `I = I0 * exp(-kappa * sum(t_f))` along
    the staircase path exactly.
 3. `kappa_s = 0`, `B = 0`: transmittance vs. true `exp(-tau)` — the SC path is a
-   staircase, so the deviation is O(h) and shrinks under refinement (validation
-   anchor 3 is exact only for true-ray schemes; document this).
+   staircase and the deviation is **bounded but resolution-independent**: it does
+   *not* shrink with h, because the discrete recursion's effective direction is
+   set by the bilinear weights, not by Omega (validation anchor 3 is exact only
+   for true-ray schemes; documented in `docs/sc-transport.md` §12.2/§12.5 and
+   pinned by `test_transmittance_staircase_error`; corrected 2026-11-16 after
+   the T5 ladder probes measured the same h-independent error in the `chain`
+   sweep — plan/solver-test-matrix-plan.md finding F11).
 4. Slab + Gaussian cloud: SC converges toward the reference as h -> 0; SC vs.
    chain agreement at fixed grid.
 5. Periodic ring: wrap-pass convergence, exactness after nx passes in vacuum.

@@ -1,0 +1,18 @@
+id,family,grid,transport,n_dir,n_iter,converged,wall_s,n_cells,mean_J,power,out_top,out_bottom,closure_rel,J_err_max,J_err_rms,notes
+u12/chain,SC,unigrid,chain,42,23,True,0.15,1728,0.88774,230.96,-33.30,-184.28,5.795e-02,1.139e-01,4.020e-02,ladder rung
+u24/chain,SC,unigrid,chain,42,15,True,0.61,13824,0.89230,234.67,-31.84,-182.46,8.679e-02,1.394e-01,4.412e-02,ladder rung
+u48/chain,SC,unigrid,chain,42,17,True,5.64,110592,0.89344,235.38,-31.58,-182.14,9.203e-02,1.322e-01,4.368e-02,ladder rung
+u24/sc,SC,unigrid,sc,42,19,True,0.99,13824,0.78691,171.81,-58.66,-196.30,-3.261e-01,2.246e-01,1.054e-01,F11 plateau (chain 4.1e-2 vs sc 9.4e-2 rms J)
+u24/chain/jit-false,SC,unigrid,chain,42,15,True,0.62,13824,0.89230,234.67,-31.84,-182.46,8.679e-02,1.394e-01,4.412e-02,NumPy reference backend
+u24/chain/njobs1,SC,unigrid,chain,42,15,True,0.62,13824,0.89230,234.67,-31.84,-182.46,8.679e-02,1.394e-01,4.412e-02,threading off
+oct-d2(tau2)/chain,SC,octree_grid,chain,42,16,True,2.54,6952,0.86454,221.29,-35.62,-186.45,-3.508e-03,5.870e-02,2.050e-02,
+oct-d3(tau2)/chain,SC,octree_grid,chain,42,16,True,8.4,25264,0.86479,221.34,-35.49,-186.35,-2.239e-03,5.518e-02,5.856e-03,ladder rung
+oct-d5(tau1)/chain,SC,octree_grid,chain,42,16,True,13.04,34476,0.86424,221.98,-35.76,-186.29,-3.256e-04,5.553e-02,4.189e-03,ladder rung
+oct-REF/ng-off,SC,octree_grid,chain,42,16,True,21.23,50380,0.86424,222.88,-35.65,-186.29,4.200e-03,7.827e-10,3.496e-10,plain lambda iteration
+oct-REF/dM2,SC,octree_grid,chain,42,21,True,25.88,50380,0.86421,222.78,-35.66,-186.30,3.653e-03,6.032e-04,1.604e-04,delta-M 2
+oct-REF/chain,SC,octree,chain,42,16,True,19.72,50380,0.86424,222.88,,,,0,0,"reference rung (tau 0.5, depth 5)"
+A1/explicit,MC,octree-d2,stage1=explicit,0,1,True,5.65,6952,0.74929,230.68,,,n/a (no ordinate set),,,power vs SC(same grid) -2.35 %
+A1/lambda,MC,octree-d2,stage1=lambda,0,100,True,228.28,6952,0.74934,230.53,,,n/a (no ordinate set),,,power vs SC(same grid) -2.41 %
+A1/explicit/global,MC,octree-d2,stage1=explicit,0,1,True,6.62,6952,0.74999,231.96,,,n/a (no ordinate set),,,power vs SC(same grid) -1.81 %
+A2/next-flight,MC,octree-d2,stage2 next_flight,42,1,True,0.0,6952,0.70858,,,,n/a (stage-2 only),,,agg dev / agg sigma = 0.998
+B/adjoint-all-sky,MC,octree-d2,adjoint (exact-HG),42,1,True,,2,,,,,n/a (detector estimator),,,"masked rms z vs SC columns [1.62, 2.18] -- per-ordinate gap is F14-limited (quadrature-normalized vs analytic beam HG), not noise-limited"

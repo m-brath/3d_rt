@@ -403,3 +403,6 @@ FodyWeavers.xsd
 # regeneratable interactive vtk.js scene exports (scripts/compare_transport.py)
 plot/compare_transport/scene_*.html
 plot/compare_transport/_solve_cache/
+
+# per-run solve cache of the solver-matrix report (scripts/solver_matrix.py)
+plot/solver_matrix/_solve_cache/

@@ -22,8 +22,11 @@ Python. Physical assumptions (do not change them without being asked):
 See `plan/plan.md` for the agreed design, implementation phases and the decisions log.
 That plan is the source of truth when a decision is already recorded there; if you change
 a design decision, update the decisions log in `plan/plan.md` rather than contradicting it
-silently. The solver package `rt3d/` described there does **not** exist yet — it is created
-in phase 0.
+silently. The solver package `rt3d/` described there **exists and implements phases
+0–6 plus the Monte Carlo family `rt3d/mc/`** (SC solvers, MC solvers A1/A2/adjoint,
+octree + unigrid transport, Lambertian ground in both families). The cross-solver test
+matrix (pytest tiers T0–T5) and its findings log F1–F14 live in
+`plan/solver-test-matrix-plan.md`.
 
 **All plans belong in the project's `plan/` folder.** Whenever you create a plan
 (work plans for new tasks, follow-up plans like `plan/manual-plan.md`), write it to
@@ -86,14 +89,21 @@ and saying so explicitly.
 
 ```
 3d_rt_sandbox/
-  scripts/        existing standalone research scripts (see below)
-  inputdata/      currently empty — input fields / grids go here
-  plot/           currently empty — figure and image output goes here
-  plan/           all plans live here (plan.md: agreed design, phase breakdown
-                  and decisions log; additional plans as separate files)
-  docs/           detailed technical documentation (e.g. sc-transport.md)
-  AGENTS.md       this file
-  .gitignore      Visual Studio template
+  rt3d/         the solver package (SC + MC families: geometry, octree, directions,
+                transport, characteristics, short_characteristics, solver, source,
+                accelerator, ground, diagnostics, jit, cases/, mc/)
+  tests/        the pytest test matrix (T0-T5) plus per-feature modules;
+                shared helpers in matrix_cases.py / matrix_stats.py
+  scripts/      existing standalone research scripts (see below)
+  inputdata/    currently empty — input fields / grids go here
+  plot/         figure and image output (report artifacts under plot/solver_matrix/,
+                solve caches gitignored)
+  plan/         all plans live here (plan.md: agreed design, phase breakdown
+                and decisions log; additional plans as separate files)
+  docs/         detailed technical documentation (e.g. sc-transport.md)
+  pytest.ini    test markers: slow / mc / reference
+  AGENTS.md     this file
+  .gitignore    Visual Studio template
   .gitattributes  "* text=auto" (LF normalization)
 ```
 
@@ -149,8 +159,14 @@ level-specific index arithmetic.
 
 ## Running and checking
 
-This directory **is a git repository** (branch `main`). There is **no test runner
-installed**.
+This directory **is a git repository** (branch `main`). The test matrix lives in
+`tests/` and runs with **pytest** (installed in `pyarts`; `pytest.ini` defines the
+markers `slow`, `mc`, `reference`):
+
+```sh
+~/miniforge3/envs/pyarts/bin/python -m pytest -q                    # full matrix
+~/miniforge3/envs/pyarts/bin/python -m pytest -q -m "not slow"      # fast tiers T0-T4
+```
 
 Quick sanity check that the environment works:
 
