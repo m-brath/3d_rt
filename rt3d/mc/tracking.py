@@ -35,7 +35,7 @@ here is the reference NumPy path.
 import numpy as np
 
 from rt3d.geometry import ray_box_exit
-from rt3d.mc.sources import hg_scatter_directions
+from rt3d.mc.sources import face_inflow_directions, hg_scatter_directions
 from rt3d.octree import octree_grid
 
 
@@ -398,7 +398,11 @@ def walk_octree(starts, directions, oct, budgets, periodic_box=None):
             neg = da < 0.0
             if not (pos.any() or neg.any()):
                 continue
-            tf = np.empty(act.size)
+            # entries with da == 0 (axis-parallel or exactly zero component,
+            # e.g. the beam's dy = 0 or the z-pole ordinates) must stay at
+            # +inf: np.empty here left them uninitialised, and the minimum
+            # below then mixed in heap garbage -- run-to-run nondeterminism.
+            tf = np.full(act.size, np.inf)
             tf[pos] = (c[pos, axis] + h[pos] - pa[pos, axis]) / da[pos]
             tf[neg] = (c[neg, axis] - h[neg] - pa[neg, axis]) / da[neg]
             t_face = np.minimum(t_face, tf)
@@ -783,7 +787,8 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
                     periodic_box=None, seed=0, scatter=True,
                     max_collisions=20000, path_cap=None, tally_direct=None,
                     is_direct=None, implicit_capture=False,
-                    roulette_floor=None, jit=False):
+                    roulette_floor=None, jit=False, ground=None,
+                    down_irr_cols=None):
     """
     Fly analog MC histories generation by generation with the M0 flight
     sampler, tallying every flight's track lengths as they are produced and
@@ -816,6 +821,27 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
         Russian roulette at every real collision: a history with ``w < f``
         survives with probability 1/2 (weight doubled) or is killed; zero
         weights are always killed.  Keeps the expected weight unchanged.
+
+    Phase M6 (plan/solver-test-matrix-plan.md section 7) ground support:
+
+    ``ground={"z0": float, "albedo": float}``
+        Lambertian ground at the domain bottom.  A **diffuse** history that
+        exits through the bottom face does not die there: it continues as a
+        cosine-weighted (Lambertian) re-emission from the hit point with its
+        weight multiplied by ``albedo`` — the analog ground reflection,
+        self-consistent inside one history (the multiple-reflection series is
+        the scattering-series tail).  **Direct** (unscattered-beam) histories
+        still terminate at the ground: the reflected beam is not an analog
+        branch there but a dedicated population seeded by
+        `rt3d.mc.forward.j_mc` with the exact attenuated beam irradiance
+        (mirrors the SC solver, where the beam ground reflection enters
+        through the fixed ground inflow).
+    ``down_irr_cols`` : dict from `rt3d.mc.ground.bottom_columns`
+        While tracking, accumulate the per-column ground-level downward
+        irradiance *numerator* ``sum_seg w |mu| len`` over downward flight
+        segments inside the bottom cells; returned as 'down_irr' in
+        `bottom_mask` order (divide by ``cols["vol"]`` for ``F_down``, the MC
+        twin of `rt3d.transport.downward_irradiance`).
     ``jit=True``
         Route every generation's flight sampling through the numba kernel
         (`rt3d.mc.jitmc`) when usable — statistically equivalent, numba's
@@ -897,6 +923,16 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
     absorbed = np.zeros(K, dtype=bool)
     exited = np.zeros(K, dtype=bool)
     n_trunc = 0
+    n_grnd = np.zeros(K, dtype=np.int64)
+
+    down_acc = None
+    inv_cell = None
+    if down_irr_cols is not None:
+        down_acc = np.zeros(int(down_irr_cols["vol"].size))
+        inv_cell = -np.ones(kappa_e.size, dtype=np.int64)
+        inv_cell[down_irr_cols["idx"]] = np.arange(
+            int(down_irr_cols["idx"].size))
+    zb_tol = 1e-9 * max(b[1] - b[0] for b in grid.box)
 
     rng = np.random.default_rng(seed)
     gen = 0
@@ -928,6 +964,18 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
                 if np.any(dm):
                     tally_direct.add(live[sh][dm], sc[dm], sl[dm], wseg[dm], dseg[dm])
 
+        # --- ground-level downward irradiance tally (M6)
+        if down_acc is not None and sh.size:
+            mu_s = dl[sh][:, 2]
+            sel = np.flatnonzero(mu_s < 0.0)
+            if sel.size:
+                slot = inv_cell[sc[sel]]
+                ok = slot >= 0
+                if np.any(ok):
+                    j = sel[ok]
+                    np.add.at(down_acc, slot[ok],
+                              w[live[j]] * np.abs(mu_s[j]) * sl[j])
+
         # --- event bookkeeping
         ev = res["coll_event"]
         n_coll[live] += (ev != EV_EXIT).astype(np.int64)
@@ -952,18 +1000,47 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
         else:
             cont = scat
 
+        # --- Lambertian ground reflection (M6): a diffuse history reaching
+        # the bottom face continues as cosine-weighted re-emission, w x= A_g.
+        # Beam (still-direct) histories terminate here — their reflected
+        # part is the dedicated ground population of j_mc (exact treatment).
+        ghit = np.zeros(live.size, dtype=bool)
+        if ground is not None and ground.get("albedo", 0.0) > 0.0:
+            x_ex = pl + seg_end[:, None] * dl
+            ghit = exit_ev & (dl[:, 2] < 0.0) \
+                & (x_ex[:, 2] <= ground["z0"] + zb_tol)
+            if direct is not None:
+                ghit &= ~direct[live]
+            if np.any(ghit):
+                w[live[ghit]] *= float(ground["albedo"])
+                ghit &= w[live] > 0.0
+            if np.any(ghit):
+                pos[live[ghit]] = x_ex[ghit]
+                pos[live[ghit], 2] = ground["z0"] + zb_tol
+                if periodic_box is not None:
+                    pos[live[ghit]] = periodic_box.wrap_xy(pos[live[ghit]])
+                d[live[ghit]] = face_inflow_directions(
+                    int(np.count_nonzero(ghit)), 2, -1, rng)
+                n_grnd[live[ghit]] += 1
+                exited[live[ghit]] = False
+                absorbed[live[ghit]] = False
+                cont = cont | ghit
+
         if not np.any(cont):
             break   # every history in this generation was absorbed or exited
 
         isl = live[cont]
-        coll_cell = res["coll_cell"][cont]
-        pos[isl] = pl[cont] + res["coll_distance"][cont, None] * dl[cont]
-        if periodic_box is not None:
-            pos[isl] = periodic_box.wrap_xy(pos[isl])
-        d[isl] = hg_scatter_directions(dl[cont], coll_cell, g, rng)
+        isc = cont & ~ghit
+        if np.any(isc):
+            i2 = live[isc]
+            coll_cell = res["coll_cell"][isc]
+            pos[i2] = pl[isc] + res["coll_distance"][isc, None] * dl[isc]
+            if periodic_box is not None:
+                pos[i2] = periodic_box.wrap_xy(pos[i2])
+            d[i2] = hg_scatter_directions(dl[isc], coll_cell, g, rng)
+            if direct is not None:
+                direct[i2] = False
         n_scat[live[scat]] += 1
-        if direct is not None:
-            direct[isl] = False
 
         # --- Russian roulette on the surviving population
         if roulette_floor is not None and isl.size:
@@ -987,6 +1064,8 @@ def track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
         "n_collisions": n_coll,
         "n_null": n_null,
         "n_scatter": n_scat,
+        "n_ground_reflections": int(np.sum(n_grnd)),
+        "down_irr": down_acc,
         "absorbed": absorbed,
         "exited": exited,
         "capped": capped,

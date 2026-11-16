@@ -39,8 +39,16 @@ tallied.  The explicit variant follows the un-split particle physics, so its
 unscattered beam tracks are tallied into a separate 'J_direct' and reported
 apart from 'J'.
 
-Not implemented in M1 (plan phase scope): the Lambertian + emissive ground
-(`bc.ground` raises `NotImplementedError`), implicit capture / Russian
+Ground support (phase M6, plan/solver-test-matrix-plan.md section 7):
+`bc.ground` seeds the ground-emission and ground-reflected-beam populations
+on the bottom face via `rt3d.mc.ground` (the SC `ground_inflow` law itself),
+and the albedo feedback enters as analog boundary scattering in the explicit
+chain (`rt3d.mc.tracking.track_histories(ground=...)`) or as a re-seeded
+iterated inflow from the previous iteration's ground irradiance in the lambda
+variant (the exact twin of the SC sweep ordering).  A variable-height ground
+raises `NotImplementedError`.
+
+Not implemented in M1 (plan phase scope): implicit capture / Russian
 roulette (M4), stage-2 radiance (M2).
 """
 
@@ -68,16 +76,19 @@ from rt3d.mc.tracking import (
 from rt3d.source import single_scattering_albedo
 
 
-def _inflow_faces(bc, periodic_box):
+def _inflow_faces(bc, periodic_box, has_ground=False):
     """
     Faces carrying a constant inflow intensity: list of (axis, side, I_in).
     Periodic x/y faces are skipped (`bc.side_I` is ignored there — same
-    convention as `rt3d.transport.boundary_conditions.inflow`).
+    convention as `rt3d.transport.boundary_conditions.inflow`).  With a
+    Lambertian `ground` the bottom face is excluded: its inflow is the
+    ground radiance, seeded as a dedicated population (phase M6, mirrors the
+    SC solver where `bottom_I` is superseded by the ground inflow).
     """
     faces = []
     if bc.top_I != 0.0:
         faces.append((2, 1, bc.top_I))
-    if bc.bottom_I != 0.0:
+    if bc.bottom_I != 0.0 and not has_ground:
         faces.append((2, -1, bc.bottom_I))
     if bc.side_I != 0.0:
         per = {
@@ -123,6 +134,36 @@ def _single_flight(starts, directions, grid, kappa_e, mode="cell",
         "coll_event": res["coll_event"],
         "survived": res["survived"],
     }
+
+
+def _ground_seed_flight(grid, I_col, cols, n, kappa_e, seed, trkw):
+    """
+    Removal-only transport of a ground population seeded with per-column
+    radiance ``I_col`` (phase M6): face positions from
+    `rt3d.mc.ground.sample_ground_face`, cosine-weighted upward directions,
+    power ``pi sum_col I_col area_col / n`` per history.  Returns
+    ``(record, weights)`` in the `populations` convention of `j_mc`.
+    """
+    from rt3d.mc.ground import (ground_face_weight, sample_ground_face,
+                                upward_directions)
+
+    rng = np.random.default_rng(seed)
+    pos, _ = sample_ground_face(n, grid, I_col, rng, cols=cols)
+    dirs = upward_directions(n, rng)
+    rec = _single_flight(pos, dirs, grid, kappa_e, seed=seed + 3, **trkw)
+    return rec, np.full(int(n), ground_face_weight(I_col, cols, n))
+
+
+def _beam_tau(grid, beam, kappa_e, periodic_box=None):
+    """Direct-beam optical depth at cell/leaf centers (physical kappa_e)."""
+    from rt3d.octree import octree_grid
+    from rt3d.transport import beam_optical_depth, beam_optical_depth_octree
+
+    if isinstance(grid, octree_grid):
+        return beam_optical_depth_octree(grid, beam["omega_sun"], kappa_e,
+                                         periodic_box=periodic_box)
+    return beam_optical_depth(grid, beam["omega_sun"], kappa_e,
+                              periodic_box=periodic_box)
 
 
 def _concat_populations(populations, n_cells, n_batches, flux):
@@ -240,6 +281,7 @@ def j_mc(
     n_histories=20000,
     n_boundary_histories=20000,
     n_beam_histories=20000,
+    n_ground_histories=None,
     n_batches=100,
     seed=0,
     mode="cell",
@@ -269,7 +311,12 @@ def j_mc(
         Planck function (thermal emission), may be zeros.
     bc : rt3d.transport.boundary_conditions
         Face inflows ``top_I`` / ``bottom_I`` / ``side_I`` (periodic faces are
-        skipped).  A Lambertian `ground` is not part of M1 and raises.
+        skipped).  A Lambertian ``ground`` (phase M6) is supported: the bottom
+        face inflow is replaced by the ground radiance
+        ``eps_g B_g + A_g (F_down + F_beam)/pi`` — emission and reflected
+        beam as dedicated face populations, albedo feedback via analog
+        boundary scattering (explicit) or per-iteration reseeding (lambda).
+        A variable-height ground raises ``NotImplementedError``.
     g : float or (n_cells,) ndarray
         HG asymmetry parameter (sampled exactly by the HG inverse-CDF, so MC
         has no 42-ordinate resolution limit for ``g > 0.5``).
@@ -370,11 +417,11 @@ def j_mc(
     if birth not in ("uniform", "source"):
         raise ValueError(f"birth must be 'uniform' or 'source', got {birth!r}")
     if getattr(bc, "ground", None) is not None:
-        raise NotImplementedError(
-            "MC stage 1 implements the face inflows of boundary_conditions; "
-            "the self-coupled Lambertian ground is not part of M1 "
-            "(plan/mc-plan.md)"
-        )
+        from rt3d.mc.ground import ground_or_raise
+
+        ground = ground_or_raise(bc)          # flat ground only (M6 guard)
+    else:
+        ground = None
     if ng is not None and stage1 == "lambda" and not crn:
         raise ValueError(
             "Ng acceleration of the MC lambda iteration requires crn=True "
@@ -411,7 +458,7 @@ def j_mc(
     elif ng is False:
         ng = None
 
-    faces = _inflow_faces(bc, periodic_box)
+    faces = _inflow_faces(bc, periodic_box, has_ground=ground is not None)
     per_face = max(1, int(n_boundary_histories) // len(faces)) if faces else 0
     trkw = dict(mode=mode, kappa_max=kappa_max, periodic_box=periodic_box,
                 path_cap=path_cap)
@@ -444,6 +491,43 @@ def j_mc(
             )
             populations.append((beam_rec, beam_rec["child_w"]))
             n_null += beam_rec["n_null"]
+
+        # fixed source 3: the constant part of the ground inflow (phase M6) —
+        # thermal ground emission eps_g B_g and the ground-reflected beam
+        # A_g F_beam/pi, both seeded on the bottom face with cosine-weighted
+        # directions (rt3d.mc.ground wraps the SC ground_inflow /
+        # beam_irradiance_ground law).  The albedo part A_g F_down/pi is
+        # rebuilt from the transported field inside the loop below — the exact
+        # twin of the SC sweep ordering of rt3d.solver.lambda_iteration.
+        gcols = None
+        fd_fixed = None
+        if ground is not None:
+            from rt3d.mc import ground as mcg
+
+            gcols = mcg.bottom_columns(grid)
+            n_g = max(int(n_ground_histories or n_boundary_histories),
+                      int(n_batches))
+            if ground.emissivity * ground.B_g > 0.0:
+                I_emit = np.full(int(gcols["vol"].size),
+                                 ground.emissivity * ground.B_g)
+                rec, w = _ground_seed_flight(grid, I_emit, gcols, n_g,
+                                             kappa_e, seed + 991, trkw)
+                populations.append((rec, w))
+                n_null += rec["n_null"]
+            if beam is not None:
+                I_ref = ground.albedo * mcg.ground_beam_irradiance(
+                    grid, beam, kappa_e,
+                    _beam_tau(grid, beam, kappa_e, periodic_box),
+                    periodic_box) / np.pi
+                if I_ref.sum() > 0.0:
+                    rec, w = _ground_seed_flight(grid, I_ref, gcols, n_g,
+                                                 kappa_e, seed + 1231, trkw)
+                    populations.append((rec, w))
+                    n_null += rec["n_null"]
+
+            fd_fixed = np.zeros(int(gcols["vol"].size))
+            for rec, w in populations:
+                fd_fixed += mcg.down_irradiance_from_segments(rec, w, gcols)
 
         fixed = _concat_populations(populations, nc, n_batches, tally_flux)
         fixed_res = fixed.result(vol)
@@ -514,10 +598,41 @@ def j_mc(
                 var.add(rec["hist"], rec["cell"], rec["len"], w[rec["hist"]],
                         rec["dirs_hist"][rec["hist"]])
             else:
-                var = track_tally(nc, var_hist, n_batches, flux=tally_flux)
+                rec, w = None, None
+                # empty tally on the *fixed* batching so the merges below
+                # stay legal when there are no volume births at all
+                var = track_tally(nc, max(1, fixed.n_histories), n_batches,
+                                  flux=tally_flux)
+
+            # ground albedo inflow (phase M6): F_down of the field transported
+            # in this iteration (fixed populations + the volume source — the
+            # twin of the SC downward sweep, which also sees no ground inflow
+            # yet), then A_g F_down/pi seeded on the bottom face and
+            # transported with the same removal-only operator.
+            grnd = None
+            if ground is not None and ground.albedo > 0.0:
+                from rt3d.mc import ground as mcg
+
+                fd = fd_fixed.copy()
+                if rec is not None:
+                    fd += mcg.down_irradiance_from_segments(rec, w, gcols)
+                I_gal = ground.albedo * fd / np.pi
+                if I_gal.sum() > 0.0:
+                    n_gi = max(n_g, n_batches)      # keep batch count mergeable
+                    grec, gw = _ground_seed_flight(grid, I_gal, gcols, n_gi,
+                                                   kappa_e, seed + 7001 + it,
+                                                   trkw)
+                    n_null += grec["n_null"]
+                    grnd = track_tally(nc, grec["n_histories"], n_batches,
+                                       flux=tally_flux)
+                    grnd.add(grec["hist"], grec["cell"], grec["len"],
+                             gw[grec["hist"]], grec["dirs_hist"][grec["hist"]])
+
             merged = track_tally(nc, fixed.n_histories, n_batches, flux=tally_flux)
             merged.merge(fixed)
             merged.merge(var)
+            if grnd is not None:
+                merged.merge(grnd)
             res_tot = merged.result(vol)
             n_iter_done = it + 1
 
@@ -548,6 +663,10 @@ def j_mc(
             "n_histories": var_hist,
             "n_boundary_histories": per_face * len(faces),
             "n_beam_histories": int(n_beam_histories) if beam is not None else 0,
+            "n_ground_histories": n_g if ground is not None else 0,
+            "ground": None if ground is None else {
+                "albedo": ground.albedo, "emissivity": ground.emissivity,
+                "B_g": ground.B_g},
             "n_null": int(n_null),
             "n_null_source": 0,
             "n_generations": (beam_rec or {}).get("n_generations", 0),
@@ -598,8 +717,40 @@ def j_mc(
                                * face_area(grid.box, axis) / pos.shape[0]))
         direct.append(np.ones(pos.shape[0], dtype=bool))
 
+    # ground populations (phase M6): the fixed parts of the ground radiance —
+    # emission eps_g B_g and the exactly-attenuated reflected beam A_g F_b/pi.
+    # The diffuse albedo feedback is NOT seeded here: it is analog boundary
+    # scattering inside the chain (track_histories ground=...), which keeps
+    # the multiple-reflection series self-consistent within one history and
+    # avoids double counting with the reflected-beam population (the direct
+    # beam terminates at the ground).
+    if ground is not None:
+        from rt3d.mc import ground as mcg
+
+        gcols = mcg.bottom_columns(grid)
+        n_g = int(n_ground_histories or n_boundary_histories)
+        rng_g = np.random.default_rng(seed + 991)
+        for I_g_col in (
+            np.full(int(gcols["vol"].size), ground.emissivity * ground.B_g)
+            if ground.emissivity * ground.B_g > 0.0 else None,
+            ground.albedo * mcg.ground_beam_irradiance(
+                grid, beam, kappa_e, _beam_tau(grid, beam, kappa_e,
+                                               periodic_box), periodic_box
+            ) / np.pi if beam is not None else None,
+        ):
+            if I_g_col is None or I_g_col.sum() <= 0.0:
+                continue
+            pos, _ = mcg.sample_ground_face(n_g, grid, I_g_col, rng_g,
+                                            cols=gcols)
+            starts.append(pos)
+            dirs.append(mcg.upward_directions(n_g, rng_g))
+            weights.append(np.full(n_g, mcg.ground_face_weight(I_g_col,
+                                                               gcols, n_g)))
+            direct.append(np.zeros(n_g, dtype=bool))
+
     if not starts:
-        raise ValueError("no source population: B, bc inflows and beam are all zero")
+        raise ValueError(
+            "no source population: B, bc inflows, ground and beam are all zero")
 
     K = sum(s.shape[0] for s in starts)
     starts = np.concatenate(starts)
@@ -616,7 +767,10 @@ def j_mc(
                          periodic_box=periodic_box, mode=mode,
                          kappa_max=kappa_max, path_cap=path_cap, seed=seed,
                          implicit_capture=implicit_capture,
-                         roulette_floor=roulette_floor, jit=jit)
+                         roulette_floor=roulette_floor, jit=jit,
+                         ground=None if ground is None else
+                         {"z0": float(grid.box[2][0]),
+                          "albedo": float(ground.albedo)})
 
     res_tot = tally.result(vol)
     out = _common_output(res_tot, kappa_a, B)
@@ -644,6 +798,11 @@ def j_mc(
         "n_histories": int(np.count_nonzero(~direct)),
         "n_boundary_histories": per_face * len(faces),
         "n_beam_histories": int(n_beam_histories) if beam is not None else 0,
+        "n_ground_histories": n_g if ground is not None else 0,
+        "ground": None if ground is None else {
+            "albedo": ground.albedo, "emissivity": ground.emissivity,
+            "B_g": ground.B_g},
+        "n_ground_reflections": int(tr["n_ground_reflections"]),
         "n_null": int(np.sum(tr["n_null"])),
         "n_null_source": int(n_null_source),
         "n_generations": int(tr["n_generations"]),
@@ -754,6 +913,7 @@ def radiance_from_source(
     mode="cell",
     kappa_max=None,
     jit=False,
+    ground_I=None,
 ):
     """
     MC stage 2 — the radiance field ``I(cell, ordinate)`` of a **fixed**
@@ -795,8 +955,8 @@ def radiance_from_source(
     S_total : (n_cells,) or (n_cells, N_dir) ndarray
         Fixed source function (intensity units), e.g. `stage2_source`.
     bc : rt3d.transport.boundary_conditions
-        Face inflows; a Lambertian `ground` raises NotImplementedError (M2
-        scope — the self-coupled surface needs the SC phase-5 machinery).
+        Face inflows; with a Lambertian ``ground`` (M6) the bottom-face inflow
+        is superseded by ``ground_I`` below.
     periodic_box : rt3d.geometry.cuboid, optional
     estimator : {"next_flight", "deterministic"}
     n_histories : int
@@ -811,6 +971,15 @@ def radiance_from_source(
         Route the next-flight sampling through the numba fast path
         (`rt3d.mc.jitmc`) when usable — statistically equivalent, different
         random stream (M4/M5).
+    ground_I : (n_bottom,) ndarray, optional
+        Fixed ground radiance per bottom column in `bottom_mask` order
+        (phase M6): applied at the bottom-face exit of upward ordinates'
+        backward marches in place of ``bc.bottom_I`` — for the octree the
+        hit column of each march is resolved via `octree_grid.locate`, for
+        the unigrid via its k = 0 layer.  Required whenever ``bc.ground`` is
+        set (the stage-2 source is fixed, so the ground law must be handed
+        in already closed: `rt3d.mc.ground.ground_radiance` with the
+        converged ``F_down`` and the beam ground irradiance).
 
     Returns
     -------
@@ -823,6 +992,7 @@ def radiance_from_source(
         'n_histories', 'n_batches', 'n_null', 'jit'   traceability / diagnostics
     """
     from rt3d.geometry import ray_box_exit
+    from rt3d.mc import ground as mc_ground
     from rt3d.octree import octree_grid
     from rt3d.transport import _block_prefixes, precompute_octree_march
 
@@ -831,11 +1001,30 @@ def radiance_from_source(
             f"estimator must be 'next_flight' or 'deterministic', got {estimator!r}"
         )
     if getattr(bc, "ground", None) is not None:
-        raise NotImplementedError(
-            "MC stage 2 implements the face inflows of boundary_conditions; "
-            "the self-coupled Lambertian ground is not part of M2 "
-            "(plan/mc-plan.md)"
-        )
+        from rt3d.mc.ground import ground_or_raise
+
+        ground_or_raise(bc)
+        if ground_I is None:
+            raise ValueError(
+                "radiance_from_source with bc.ground needs the fixed ground "
+                "radiance as ground_I=(n_bottom,) in bottom_mask order — the "
+                "stage-2 source is fixed, so the ground law must be supplied "
+                "already closed (e.g. rt3d.mc.ground.ground_radiance(grid, "
+                "bc.ground, F_down, beam_irr) with F_down from the converged "
+                "SC or MC field)"
+            )
+    gcols = None
+    if ground_I is not None:
+        from rt3d.mc.ground import bottom_columns
+
+        gcols = bottom_columns(grid)
+        ground_I = np.asarray(ground_I, dtype=float)
+        if ground_I.shape != (int(gcols["vol"].size),):
+            raise ValueError(
+                f"ground_I must have shape ({int(gcols['vol'].size)},) "
+                "(bottom columns, bottom_mask order)")
+        if np.any(ground_I < 0.0):
+            raise ValueError("ground_I must be non-negative")
 
     is_octree = isinstance(grid, octree_grid)
     nc = n_cells_of(grid)
@@ -871,14 +1060,37 @@ def radiance_from_source(
             budget = np.zeros(nc)
             np.add.at(budget, ray_of, seg_len)
             I_in = np.full(nc, bc.top_I if om[2] < 0.0 else bc.bottom_I)
+            if gcols is not None and om[2] > 0.0:
+                # upward ordinate: backward march exits through the ground;
+                # inflow is the ground radiance of the hit column (M6).
+                # The exit point lives in the *unwrapped* marching frame --
+                # fold x/y back into the box before the column lookup, or
+                # wrapped rays read the wrong (clamped boundary) column.
+                p_ex = centers - budget[:, None] * om[None, :]
+                if periodic_box is not None:
+                    p_ex = periodic_box.wrap_xy(p_ex)
+                I_in = ground_I[mc_ground.ground_column_lookup(grid, p_ex,
+                                                               gcols)]
         else:
             if periodic_box is None:
                 budget, ex_ax, ex_side = ray_box_exit(centers, u, grid.box)
                 I_in = bc.inflow(ex_ax, ex_side)
+                if gcols is not None:
+                    m_g = (ex_ax == 2) & (ex_side == -1)
+                    if np.any(m_g):
+                        p_ex = centers[m_g] + budget[m_g, None] * u[None, :]
+                        I_in[m_g] = ground_I[
+                            mc_ground.ground_column_lookup(grid, p_ex, gcols)]
             else:
                 budget = _exit_distance(centers, np.tile(u, (nc, 1)), grid,
                                         periodic_box=periodic_box)
                 I_in = np.full(nc, bc.top_I if om[2] < 0.0 else bc.bottom_I)
+                if gcols is not None and om[2] > 0.0:
+                    p_ex = centers - budget[:, None] * om[None, :]
+                    # fold the unwrapped exit point back into the box
+                    p_ex = periodic_box.wrap_xy(p_ex)
+                    I_in = ground_I[mc_ground.ground_column_lookup(grid, p_ex,
+                                                                   gcols)]
             # segment records of the backward march: needed for the exact
             # uncollided attenuation on the inhomogeneous lattice in **both**
             # estimators (and for the deterministic source integral)

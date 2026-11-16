@@ -299,7 +299,10 @@ def test_backward_guards_and_traceability():
         assert r[key] == want
     assert r["n_exited"] + r["n_absorbed"] + r["n_capped"] == 500
 
-    bc_g = boundary_conditions(top_I=1.0, ground=ground_surface(albedo=0.5))
+    bc_g = boundary_conditions(
+        top_I=1.0, ground=ground_surface(albedo=0.5,
+                                         height=lambda x, y: 0.0 * x))
+    # M6: flat ground is supported; the guard is the variable surface
     with pytest.raises(NotImplementedError):
         backward_detector_mc(grid, ke, ks, B, bc_g, det, periodic_box=box)
 

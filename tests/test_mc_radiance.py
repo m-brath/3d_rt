@@ -200,8 +200,19 @@ def test_stage2_source_and_guards():
                              estimator="adjoint")
 
     bc_g = boundary_conditions(top_I=1.0, ground=ground_surface(albedo=0.5))
-    with pytest.raises(NotImplementedError):
+    # M6: bc.ground is supported but needs the closed ground radiance
+    with pytest.raises(ValueError, match="ground_I"):
         radiance_from_source(grid, DG, ke, S, bc_g, periodic_box=box)
+    # a variable surface stays out of scope (NotImplementedError)
+    bc_vg = boundary_conditions(top_I=1.0,
+                                ground=ground_surface(albedo=0.5,
+                                                      height=lambda x, y: 0.0 * x))
+    with pytest.raises(NotImplementedError):
+        radiance_from_source(grid, DG, ke, S, bc_vg, periodic_box=box)
+    # wrong-shaped ground_I is rejected
+    with pytest.raises(ValueError, match="ground_I"):
+        radiance_from_source(grid, DG, ke, S, bc_g, periodic_box=box,
+                             ground_I=np.array([0.1]))
 
     r = radiance_from_source(grid, DG, ke, S, bc, periodic_box=box,
                              estimator="next_flight", n_histories=40,

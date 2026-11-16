@@ -51,8 +51,13 @@ the uniform-in-cap pdf, so no extra factor appears — plan section 4).
 (half angle from the ordinate's solid-angle weight) and returns the all-sky
 image differencable against the stage-2 / SC radiance columns.
 
-Not implemented (M3 scope): Lambertian ground BC (`bc.ground` raises),
-variance reduction (M4).
+Ground support (phase M6): on a ground hit an adjoint walk scores the
+inhomogeneous ground source ``eps_g B_g + A_g F_beam(x_g)/pi`` and continues
+cosine-weighted upward with ``wt x= A_g`` — the adjoint of the
+``A_g F_down/pi`` part of the ground law (plan/solver-test-matrix-plan.md
+section 7 item 5).  A variable-height ground raises `NotImplementedError`.
+Variance reduction (M4) implemented; no other BCs beyond
+`boundary_conditions` + `ground`.
 """
 
 import numpy as np
@@ -141,8 +146,10 @@ def backward_detector_mc(
     B : (n_cells,) ndarray
         Planck function (thermal source side of the adjoint score).
     bc : rt3d.transport.boundary_conditions
-        Face inflows scored when an adjoint walk exits the domain; a
-        Lambertian `ground` raises NotImplementedError (M3 scope).
+        Face inflows scored when an adjoint walk exits the domain; with a
+        Lambertian ``ground`` (phase M6) a ground hit scores
+        ``eps_g B_g + A_g F_beam/pi`` and continues cosine-weighted upward
+        with ``wt x= A_g``.
     detector : dict
         See the module docstring; `n_histories` is ``detector['n_seeds']``.
     g : float or (n_cells,) ndarray
@@ -189,15 +196,16 @@ def backward_detector_mc(
         'n_truncated'   statistics & traceability
     """
     from rt3d.geometry import ray_box_exit
+    from rt3d.mc import ground as mcg
     from rt3d.octree import octree_grid
     from rt3d.source import single_scattering_albedo
     from rt3d.transport import beam_optical_depth, beam_optical_depth_octree
 
-    if getattr(bc, "ground", None) is not None:
+    ground = getattr(bc, "ground", None)
+    if ground is not None and ground.is_variable():
         raise NotImplementedError(
-            "MC backward implements the face inflows of boundary_conditions; "
-            "the self-coupled Lambertian ground is not part of M3 "
-            "(plan/mc-plan.md)"
+            "variable ground surface: the MC backward solver supports only "
+            "a flat ground at the domain bottom (same guard as rt3d.solver)"
         )
 
     is_octree = isinstance(grid, octree_grid)
@@ -225,6 +233,24 @@ def backward_detector_mc(
         tau_b = np.asarray(tau_b, dtype=float)
     else:
         om_sun, F0, tau_b = None, 0.0, None
+
+    # Lambertian ground (phase M6): the inhomogeneous parts of the ground
+    # law (emission eps_g B_g + reflected beam A_g F_b/pi) are scored when an
+    # adjoint walk hits the ground; the homogeneous part A_g F_down/pi is the
+    # adjoint of the irradiance functional and is carried by continuing the
+    # walk cosine-weighted (Lambertian) upward with wt x= A_g — the adjoint
+    # counterpart of the forward cosine-weighted seeding convention.
+    gcols = None
+    I_src_g = None
+    if ground is not None:
+        gcols = mcg.bottom_columns(grid)
+        I_src_g = np.full(int(gcols["vol"].size),
+                          ground.emissivity * ground.B_g)
+        if beam is not None and ground.albedo > 0.0:
+            I_src_g += ground.albedo * mcg.ground_beam_irradiance(
+                grid, beam, kappa_e, tau_b, periodic_box) / np.pi
+    z_g = float(grid.box[2][0])
+    zg_eps = 1e-9 * (grid.box[2][1] - z_g)
 
     rng = np.random.default_rng(seed)
     pos, d = detector_seeds(detector, rng)
@@ -270,6 +296,8 @@ def backward_detector_mc(
 
         # --- exits: boundary inflow of the face the walk leaves
         exit_ev = ev == EV_EXIT
+        ghit = np.zeros(live.size, dtype=bool)
+        ghit_pts = np.zeros((live.size, 3))
         if np.any(exit_ev):
             il = live[exit_ev]
             te = res["exit_t"][exit_ev]
@@ -283,31 +311,74 @@ def backward_detector_mc(
                 reached = te >= raw[exit_ev] - 1e-9 * grid.box[2][1]
                 I_in = np.where(reached,
                                 np.where(side_up, bc.top_I, bc.bottom_I), 0.0)
+            if gcols is not None:
+                # ground hit: score the inhomogeneous ground source instead
+                # of bc.bottom_I; the albedo part continues the walk (below)
+                if periodic_box is None:
+                    hit_g = reached & (ax == 2) & (side == -1)
+                else:
+                    hit_g = reached & ~side_up
+                if np.any(hit_g):
+                    ex_l = np.flatnonzero(exit_ev)[hit_g]
+                    p_hit = pl[ex_l] + res["exit_t"][ex_l, None] * dl[ex_l]
+                    if periodic_box is not None:
+                        # exit point of a wrapped ray lives in the unwrapped
+                        # marching frame: fold it back before the column
+                        # lookup (the ground radiance is a box field)
+                        p_hit = periodic_box.wrap_xy(p_hit)
+                    I_in[hit_g] = I_src_g[
+                        mcg.ground_column_lookup(grid, p_hit, gcols)]
+                    if ground.albedo > 0.0:
+                        ghit[ex_l] = True
+                        ghit_pts[ex_l] = p_hit
             score[il] += wt[il] * I_in
             exited[il] = reached
             n_trunc += int(np.count_nonzero(~reached))
+            if np.any(ghit):
+                exited[live[np.flatnonzero(ghit)]] = False
 
         # --- continuation: scattering continues the walk with weight 1;
         # true absorption terminates (score already deposited), as does an
         # exit or a path-cap truncation.  With implicit_capture absorption
         # instead continues the walk with the albedo factor folded into the
         # history weight (Neumann series carried by omega^n weights instead
-        # of 0/1 terminations); the weight multiplies AFTER scoring.
+        # of 0/1 terminations); the weight multiplies AFTER scoring.  A
+        # ground hit (M6) continues cosine-weighted upward with wt x= A_g —
+        # the adjoint of the A_g F_down/pi part of the ground law.
         scat = ev == EV_SCATTER
         cont = (ev != EV_EXIT) if implicit_capture else scat
         cell_s = res["coll_cell"]
         if implicit_capture:
             wt[live[cont]] *= omega[cell_s[cont]]
             cont = cont & (wt[live] > 0.0)   # zero-weight kills (omega=0)
-        live = live[cont]
+        if np.any(ghit):
+            wt[live[ghit]] *= float(ground.albedo)
+            ghit &= wt[live] > 0.0
+            cont = cont | ghit
+        j_all = np.flatnonzero(cont)          # live-local, increasing order
+        live = live[j_all]
         if live.size:
             isl = live
-            j = np.flatnonzero(cont)
             n_scat[isl] += 1
-            pos[isl] = pl[j] + res["coll_distance"][j, None] * dl[j]
-            if periodic_box is not None:
-                pos[isl] = periodic_box.wrap_xy(pos[isl])
-            d[isl] = hg_scatter_directions(dl[j], cell_s[j], g, rng)
+            # continuation bookkeeping in the compacted order: pl/dl/res are
+            # indexed live-local (loc_*), live itself by compact position
+            loc_sc = np.flatnonzero(cont & ~ghit)
+            if loc_sc.size:
+                i2 = live[np.searchsorted(j_all, loc_sc)]
+                pos[i2] = (pl[loc_sc]
+                           + res["coll_distance"][loc_sc, None] * dl[loc_sc])
+                if periodic_box is not None:
+                    pos[i2] = periodic_box.wrap_xy(pos[i2])
+                d[i2] = hg_scatter_directions(dl[loc_sc], cell_s[loc_sc], g,
+                                              rng)
+            loc_gr = np.flatnonzero(ghit)
+            if loc_gr.size:
+                i3 = live[np.searchsorted(j_all, loc_gr)]
+                pos[i3] = ghit_pts[loc_gr]
+                pos[i3, 2] = z_g + zg_eps
+                if periodic_box is not None:
+                    pos[i3] = periodic_box.wrap_xy(pos[i3])
+                d[i3] = mcg.upward_directions(int(loc_gr.size), rng)
 
             # Russian roulette on the survivors
             if roulette_floor is not None:

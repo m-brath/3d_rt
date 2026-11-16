@@ -368,14 +368,15 @@ def test_traceability_and_guards():
     assert len(r["history"]) == r["n_iter"]
     assert len(r["s_max_history"]) == r["n_iter"]
 
-    class ground_bc(object):
-        top_I = 1.0
-        bottom_I = 0.0
-        side_I = 0.0
-        ground = object()          # non-None -> must raise
+    # M6: the flat Lambertian ground is supported; the guard is the
+    # variable-height surface (same as the SC solver's)
+    from rt3d.geometry import ground_surface as _gs
 
+    bc_vg = boundary_conditions(top_I=1.0, bottom_I=0.0,
+                                ground=_gs(albedo=0.5,
+                                           height=lambda x, y: 0.0 * x))
     with pytest.raises(NotImplementedError):
-        j_mc(grid, ke, 0.5 * ke, np.zeros(grid.n_cells), ground_bc(), g=0.0,
+        j_mc(grid, ke, 0.5 * ke, np.zeros(grid.n_cells), bc_vg, g=0.0,
              periodic_box=box, stage1="explicit", n_histories=1000)
 
     with pytest.raises(ValueError, match="stage1"):
