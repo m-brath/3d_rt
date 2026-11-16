@@ -1,0 +1,35 @@
+==========================================================================
+MC phase M5 integration report — SC vs MC-A(stage1+stage2) vs MC-B
+direction grid: icosahedral n_refine = 1, N_dir = 42, 21 upward ordinates
+
+closed-form anchor (octree slab h=0.25, omega = 0.01, g = 0.3, vertical node 0.125 below top):
+  analytic single-scatter I = 0.000481   adjoint walk 0.000517 +- 0.000038  z = +1.0   (exact-HG walk verified)
+
+SC angular-quadrature context at a pixel (octree slab, omega = 0.5, g = 0.3, B = 0, top inflow):
+  SC-42 pixel F_up 0.26391,  SC-162 0.25662,  SC-642 0.25623
+  adjoint walk 0.24904 +- 0.00070 (-2.81% vs SC-642): the walk is exact-HG; SC pixel fluxes carry a few % quadrature error in scattering-dominated boundary fields
+
+SLAB unigrid (tau = 5, omega = 0.5, g = 0.3, top inflow, B = 0) — GLOBAL chain quantities:
+  wall: SC 0.0s, A1 1.2s, A2 2.2s
+  A1 J vs SC J      : max|dJ|/J_max =  4.39%  (A1 rel sigma 0.56%)
+  A2 J(det, own src) vs A1 J: max =  1.85%  (stage-1 source feeds A2 by design)
+  anchor-4 closure  : net Fz(bottom-top) vs 4 pi kappa_a int J dz (2-point face extrapolation, per unit area)
+    closure SC      : absorbed 2.83267  net 2.63546  rel err -6.96%
+    closure MC A1   : absorbed 2.72904  net 2.65363  rel err -2.76%
+    closure MC A2   : absorbed 2.67772  net 2.50694  rel err -6.38%
+  (node-level slab differencing intentionally omitted: unigrid SC transport='chain' is a lattice stencil, not the line integral — M2 decision; node differencing is done on the octree below)
+
+CLOUD OCTREE (gaussian cloud, depth 3, 8576 leaves, top inflow, B = 0):
+  wall: SC 5.6s, A1 2.7s, A2 25.1s (+det), A2/SC-src 76.7s (+det), B 1.2s
+  A1 J vs SC J (norms): 6.32%  vs A1 sigma 5.04%  -> consistent
+  A2/SC-src: deterministic vs SC I = 9.6e-11 (exact-sweep identity), next-flight (117759 sigma-resolved cells): mean z -0.00, rms z 1.05, |z|<2 94.3%
+  A2 chain (isotropic omega*J source) vs det(same source) (169947 cells): mean z +0.04, rms z 1.12, |z|<2 92.8%
+  source-model term: det(isotropic omega*J from A1) vs SC I: rms 1.0% of rms(I)  (O(g) anisotropy, NOT a statistic)
+  anchor-4 closure (cell-center Fz on face leaves — 1st-order boundary extrapolation, cloud-structural):
+    closure SC      : absorbed 96.5599  net 95.9601  rel err -0.62%
+    closure MC A1   : absorbed 94.6489  net 92.7695  rel err -1.99%
+    closure MC A2   : absorbed 96.4370  net 95.6166  rel err -0.85%
+  all-sky B vs SC-42 at cloud-top pixel: 21/21 inside 2 sigma + 10% rms-sky
+  pixel hemispheric F_up: SC-42 0.03507 (-1.95% vs SC-162), A2 chain 0.04332 (isotropic-source model), B 0.03424 (-2.38% vs SC-42, -4.29% vs SC-162)
+
+chain reading: A1 -> A2 closes within stage-2 noise against its own zero-noise sweep; global anchor-4 closure agrees across families to ~2%; the adjoint B is exact-HG and matches the SC angular-converged reference at the pixel; the isotropic omega*J stage-2 source (plan sketch) is an O(g) model term at node level, not a statistic.

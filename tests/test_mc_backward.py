@@ -21,6 +21,11 @@ MC — radiance at a detector from walks launched backwards from it.
      varying-kappa slab)
   6. octree walk runs and agrees with the SC octree field
   7. guards (ground BC, detector spec) + traceability keys
+  8. (M5) closed-form single-scatter anchor at omega -> 0 on the octree
+     slab: the exact-HG walk against the deterministic integral of the
+     first-scatter series — the walk's boundary-incidence path verified
+     independent of any SC quadrature (SC-42 itself is off by ~15% on
+     this observable; see decision log MC adjoint pixel-level trust)
 """
 
 import numpy as np
@@ -302,3 +307,50 @@ def test_backward_guards_and_traceability():
         backward_detector_mc(grid, ke, ks, B, bc,
                              {"omega0": DG.directions[0], "n_seeds": 10},
                              periodic_box=box)
+
+
+# --------------------------------------------------------------------------
+# 8: (M5) closed-form single-scatter anchor, omega -> 0, exact HG
+# --------------------------------------------------------------------------
+
+
+def test_backward_single_scatter_closed_form_octree():
+    """omega = 0.01 slab, vertical detector: first-order scattering integral
+    evaluated deterministically vs the adjoint walk.  Anchors the walk's
+    boundary-incidence path against ANALYSIS (no SC quadrature involved);
+    the same observable carries a ~15% SC-42 quadrature bias (M5 report)."""
+    from rt3d.directions import hg
+    from rt3d.geometry import cuboid
+    from rt3d.octree import octree_grid
+
+    g = 0.3
+    ke = 2.0
+    box = cuboid(0.0, 4.0, 0.0, 2.0, 0.0, 2.0)
+    oct_ = octree_grid(box, h0=0.5)
+    oct_.refine(lambda x, y, z: np.full_like(x, ke), max_depth=1)
+    oct_.balance_21(max_depth=1)
+    oct_.finalize()
+    top_z = oct_.centers[:, 2].max()
+    cand = np.flatnonzero(np.abs(oct_.centers[:, 2] - top_z) < 1e-9)
+    c = cand[np.argmin(np.hypot(oct_.centers[cand, 0], oct_.centers[cand, 1]))]
+    pt = tuple(oct_.centers[c])
+
+    # I(P, +z) = int_0^{z_P} kappa_s e^{-ke s} A(z_P - s) ds,
+    # A(z) = 2 pi int_0^1 Phi(-mu) e^{-ke (z1 - z)/mu} dmu  (incidence from
+    # the top face along -mu in +z-scattered direction; cos gamma = -mu)
+    zs = np.linspace(0.0, pt[2], 4001)
+    mu = np.linspace(1e-6, 1.0, 2001)
+    A = 2 * np.pi * np.trapezoid(
+        hg(-mu, g)[None, :] * np.exp(-ke * (box.z1 - (pt[2] - zs))[:, None]
+                                    / mu[None, :]), mu, axis=1)
+    I_ana = 0.01 * ke * np.trapezoid(np.exp(-ke * zs) * A, zs)
+
+    r = backward_detector_mc(oct_, np.full(oct_.n_leaf, ke),
+                             np.full(oct_.n_leaf, 0.01 * ke),
+                             np.zeros(oct_.n_leaf),
+                             boundary_conditions(top_I=1.0),
+                             {"point": pt, "omega0": np.array([0.0, 0.0, 1.0]),
+                              "cone": 0.0, "n_seeds": 400_000},
+                             g=g, periodic_box=box, n_batches=50, seed=92)
+    assert abs(r["I"] - I_ana) < 4.0 * r["sigma_I"]
+    assert I_ana > 0.0

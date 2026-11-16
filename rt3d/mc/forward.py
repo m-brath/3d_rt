@@ -753,6 +753,7 @@ def radiance_from_source(
     seed=0,
     mode="cell",
     kappa_max=None,
+    jit=False,
 ):
     """
     MC stage 2 — the radiance field ``I(cell, ordinate)`` of a **fixed**
@@ -806,6 +807,10 @@ def radiance_from_source(
         Base PCG64 seed (stream offset per ordinate), recorded in the output.
     mode, kappa_max : str, float
         Woodcock majorant mode of the tracker.
+    jit : bool
+        Route the next-flight sampling through the numba fast path
+        (`rt3d.mc.jitmc`) when usable — statistically equivalent, different
+        random stream (M4/M5).
 
     Returns
     -------
@@ -815,7 +820,7 @@ def radiance_from_source(
                   deterministic estimator)
         'J'       (n_cells,) quadrature mean intensity of the tally
         'estimator', 'mode', 'kappa_max', 'seed', 'n_refine', 'n_dir',
-        'n_histories', 'n_batches', 'n_null'   traceability / diagnostics
+        'n_histories', 'n_batches', 'n_null', 'jit'   traceability / diagnostics
     """
     from rt3d.geometry import ray_box_exit
     from rt3d.octree import octree_grid
@@ -906,7 +911,8 @@ def radiance_from_source(
         buds = np.repeat(budget, n_h)
         res = sample_collisions(starts, np.tile(u, (K, 1)), buds, grid, kappa_e,
                                 kappa_e, mode=mode, kappa_max=kappa_max,
-                                periodic_box=periodic_box, seed=seed + 1 + d)
+                                periodic_box=periodic_box, seed=seed + 1 + d,
+                                jit=jit)
         real = res["coll_event"] != EV_EXIT
         dep = np.zeros(K)
         dep[real] = s_d[res["coll_cell"][real]]
@@ -938,4 +944,5 @@ def radiance_from_source(
         "n_histories": n_h,
         "n_batches": nb,
         "n_null": n_null_total,
+        "jit": bool(jit),
     }

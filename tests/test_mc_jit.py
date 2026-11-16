@@ -13,7 +13,9 @@ flight sampler (`rt3d.mc.jitmc`, jit.py fallback pattern).
   4. plumbing: `sample_collisions(jit=True)` routes through the kernel
      when `jit_mc_usable` (same return keys, cell mode stays null-free);
      `backward_detector_mc(jit=True)` agrees with the NumPy walk within
-     the combined 2 sigma (statistical streams differ by construction)
+     the combined 2 sigma (statistical streams differ by construction);
+     stage-2 `radiance_from_source(jit=True)` agrees with the NumPy
+     next-flight tally at aggregate sigma statistics
 """
 
 import numpy as np
@@ -22,6 +24,7 @@ from rt3d.cases.gaussian_cloud import gaussian_cloud
 from rt3d.cases.slab_1d import slab_grid
 from rt3d.cases.slab_1d import slab_grid as _sg  # noqa: F401
 from rt3d.mc.backward import backward_detector_mc
+from rt3d.mc.forward import radiance_from_source
 from rt3d.mc.jitmc import jit_mc_usable, sample_collisions_jit
 from rt3d.mc.tracking import sample_collisions
 from rt3d.transport import boundary_conditions
@@ -172,3 +175,26 @@ def test_backward_jit_matches_numpy_walk():
                               jit=True)
     z = (rj["I"] - rn["I"]) / np.hypot(rj["sigma_I"], rn["sigma_I"])
     assert abs(z) < 3.0
+
+
+def test_stage2_jit_matches_numpy_tally():
+    """radiance_from_source(jit=True): aggregate agreement with the NumPy
+    next-flight tally (M5 wiring of the fast path into stage 2)."""
+    from rt3d.directions import icosahedric_grid
+
+    dg = icosahedric_grid(n_refine=1)
+    grid, box, hz = slab_grid(4.0, 2.0, nz=8, nxy=2)
+    ke = np.full(grid.n_cells, 2.0)
+    ks = 0.5 * ke
+    S = np.full(grid.n_cells, 0.7)
+    bc = boundary_conditions(top_I=1.0)
+    kw = dict(periodic_box=box, estimator="next_flight", n_histories=60,
+              n_batches=10, seed=46)
+    rn = radiance_from_source(grid, dg, ke, S, bc, **kw)
+    rj = radiance_from_source(grid, dg, ke, S, bc, jit=True, **kw)
+    assert rj["jit"] is True
+    # uncollided part is deterministic -> identical; scatter part statistical
+    sig = rn["sigma_I"] > 1e-3 * np.sqrt(np.mean(rn["I"] ** 2))
+    z = (rj["I"] - rn["I"])[sig] / np.hypot(rj["sigma_I"], rn["sigma_I"])[sig]
+    assert np.sqrt(np.mean(z ** 2)) < 1.5
+    assert np.abs(z).max() < 5.0

@@ -1,8 +1,8 @@
 # Plan — Monte Carlo solvers (forward two-stage + backward adjoint), with null collisions
 
-Status: **M0 + M1 + M2 + M3 + M4 implemented** (M0: 2026-10-24, M1: 2026-11-13,
+Status: **M0 + M1 + M2 + M3 + M4 + M5 implemented** (M0: 2026-10-24, M1: 2026-11-13,
 M2: 2026-11-14, M3:
-2026-11-15, M4: 2026-11-15): `rt3d/mc/`
+2026-11-15, M4 + M5: 2026-11-15/16): `rt3d/mc/`
 package (`tracking.py` Woodcock core + unigrid/octree DDA walkers + analog
 history chains, `sources.py` HG inverse-CDF + birth/face/beam samplers,
 `estimators.py` track-length tallies, `forward.py` stage-1 `j_mc` both
@@ -11,11 +11,11 @@ adjoint `backward_detector_mc` / `backward_all_sky`), shared case
 `rt3d/cases/slab_1d.py`,
 `scripts/mc_phase0_check.py`, `scripts/mc_forward_slab.py`,
 `scripts/mc_forward_cloud.py`, `scripts/mc_backward.py`,
-`scripts/mc_phase4_walltimes.py`,
+`scripts/mc_phase4_walltimes.py`, `scripts/mc_compare.py`,
 `tests/test_mc_tracking.py` (9) + `tests/test_mc_sources.py` (12) +
 `tests/test_mc_forward.py` (13) + `tests/test_mc_radiance.py` (5) +
-`tests/test_mc_backward.py` (8) + `tests/test_mc_vr.py` (5) +
-`tests/test_mc_jit.py` (5). All M0 validations green. M1 slab
+`tests/test_mc_backward.py` (9) + `tests/test_mc_vr.py` (5) +
+`tests/test_mc_jit.py` (6). All M0 validations green. M1 slab
 validations green (J vs 1D-DO within 2 sigma + discretization allowance,
 variant agreement, Ng 14 vs 89 iterations at omega = 0.9, global closure
 |rel| ~ 1.3% — better than the SC-42 4.7%). M3 adjoint validations green
@@ -23,7 +23,16 @@ variant agreement, Ng 14 vs 89 iterations at omega = 0.9, global closure
 cloud all-sky at node directions 21/21 inside 2 sigma + 10% rms-sky with
 hemispheric upward-flux closure adjoint −2.2% vs the SC-162 reference (SC-42
 itself −2.0%), narrow-sensor
-efficiency figure `plot/mc_backward.png`). Adds a second solver family next
+efficiency figure `plot/mc_backward.png`). M4 green (VR sigma gains on the
+adjoint walk 3x/1.8x at omega 0.5/0.9, forward chains variance-neutral;
+numba sampler 4.5-7x, statistical equivalence; wall-time table
+`scripts/mc_phase4_walltimes.py`). M5 green (integration report
+`plot/mc_compare.png` + `plot/mc_compare.txt`: stage-2 vs SC exact-sweep
+identity 9.6e-11 and rms z ~1 statistics on the SC's own source, chain A2
+noise vs own zero-noise sweep rms z 1.12, anchor-4 closure SC −0.62%/A1
+−1.99%/A2 −0.85% on the cloud, closed-form single-scatter anchor locks the
+adjoint walk as exact-HG; the isotropic omega*J stage-2 source and SC's
+pixel-level angular quadrature are separated as model terms). Adds a second solver family next
 to the short-characteristics solver (`rt3d/`, phases 0-6 done). This plan
 reuses the octree (`rt3d/octree.py`), unigrid (`rt3d/geometry.py`),
 direction grid (`rt3d/directions.py`), ground BC
@@ -189,6 +198,33 @@ M4 implementation notes (variance reduction + numba fast path):
   on the all-sky **image** (B) VR costs ~1.9x wall at equal seeds with
   unchanged mean relative sigma — the gain is signal-dependent (strong
   pixels yes, near-zero sky pixels no), so VR stays opt-in, not default.
+
+M5 implementation notes (integration pass, `scripts/mc_compare.py`):
+
+- **Chain comparison conventions** (M2 rules applied end-to-end): stage-2
+  statistics vs SC feed the SC's own converged direction-resolved `sc['S']`
+  (next-flight rms z 1.05, |z|<2 coverage 94.3%, deterministic identity
+  9.6e-11); the production chain (A2 fed by the isotropic sketch source
+  `(1-omega) B + omega J_A1`) is differenced against the deterministic
+  sweep of its own source (rms z 1.12, coverage 92.8%) so stage-2 noise
+  and the **source-model term** stay separate; node-level MC-vs-SC
+  differencing only on octrees (unigrid `chain` stencil is a lattice
+  approximation — node slab differencing deliberately omitted).
+- **Honest findings logged** (see plan/plan.md M5 rows): the isotropic
+  omega*J stage-2 source is an O(g) model term at node level (+23.5% pixel
+  flux on the cloud) not a statistic; the adjoint walk is exact-HG and is
+  anchored against the closed-form single-scatter integral (z=+1.0, test
+  locked), while SC pixel fluxes carry a few % angular-quadrature bias in
+  B=0 scattering-dominated boundary fields (SC-42/162/642 = 0.26391 /
+  0.25662 / 0.25623 vs walk 0.24904+-0.00070 on the octree slab) — which
+  also re-explains part of M3's -1.5% slab flux closure. Global anchor-4
+  closures agree across families to ~2% (slab: SC -6.96% / A1 -2.76% /
+  A2 -6.38% with the 2-point face extrapolation; cloud face leaves: SC
+  -0.62% / A1 -1.99% / A2 -0.85%, ~1% structural).
+- Plumbings added for the pass: `radiance_from_source(jit=True)` (stage-2
+  fast path, test-locked), output keys `jit` / `implicit_capture` /
+  `roulette_floor` on stage 2 and the detectors, new backward anchor test
+  (single-scatter closed form, `tests/test_mc_backward.py` #9).
 
 Decisions taken with the user up front:
 
@@ -404,7 +440,7 @@ No new dependencies (numba, numpy, pytest already in `pyarts`).
 | M2 | Stage 2 radiance on the gaussian cloud | `I(cell, ordinate)` vs converged `lambda_iteration` within 2 sigma per cell (aggregate); measured error bars vs observed deviations (~1/sqrt(N)); deterministic-reference estimator agrees with SC sweep structurally |
 | M3 | Backward MC | top-face all-sky vs Solver A Stage 2 within 2 sigma per cone bin; beam coupling check: `kappa_a = 0` single-scatter regime vs analytic single-scatter beam source |
 | M4 | performance + variance reduction | **done 2026-11-15** — `rt3d/mc/jitmc.py` numba fast path (jit.py pattern, numpy fallback tested); `implicit_capture` + `roulette_floor` on chains, `j_mc` explicit variant and the adjoint walk; wall-time MC vs SC table in `scripts/mc_phase4_walltimes.py` (the MC family wins Stage-2/backward-style queries, SC on J — reported honestly) |
-| M5 | integration pass | `mc_compare.py` report in `plot/`, energy-balance closure over the full MC chain (A1 -> A2 -> B), decisions logged in plan/plan.md |
+| M5 | integration pass | **done 2026-11-16** — `scripts/mc_compare.py` SC vs MC-A(stage2) vs MC-B differencing report (`plot/mc_compare.png` + `plot/mc_compare.txt`), energy-balance closure over the full MC chain (A1 -> A2 -> B), decisions logged in plan/plan.md |
 
 Every phase uses `direction_grid(n_refine)` with the development grid `n_refine=1`
 (42 ordinates) for tallies; no code may assume `N_dir`. Higher levels only in a
