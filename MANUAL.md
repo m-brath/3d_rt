@@ -1,13 +1,25 @@
 # MANUAL.md — 3d_rt_sandbox
 
-User manual for **`rt3d`**, a 3D all-sky, monochromatic short-characteristics
-radiative-transfer solver written in pure NumPy.
+User manual for **`rt3d`**, a 3D all-sky, monochromatic radiative-transfer
+solver with two solver families on shared grids and boundary conditions:
 
-This manual documents the **actual code** in `rt3d/` (phases 0–6 complete,
-110 tests green). The agreed design and the decisions log live in
-[`plan/plan.md`](plan/plan.md) — that file stays the source of truth for *why*
-a decision was made; this manual explains *what the code does and how to use
-it* and cross-references the plan instead of duplicating the log.
+- **short characteristics (SC)** — deterministic λ-iteration on icosahedral
+  ordinate sets (unigrid chain / single-cell SC sweeps, octree exact
+  characteristics), with optional numba fast paths on an all-NumPy core;
+- **Monte Carlo (MC)** — Woodcock null-collision transport with
+  angle-exact HG sampling (`rt3d/mc/`), forward solvers A1/A2 and an adjoint
+  detector solver B.
+
+This manual documents the **actual code** in `rt3d/` (SC phases 0–6 and the
+MC family M0–M6 complete, **341 tests green** — 330 in the default tiers,
+re-verified on macOS/arm64 for this update; plus the 11 `slow`-tier tests).
+The agreed design and the decisions log live in
+[`plan/plan.md`](plan/plan.md), the MC design in
+[`plan/mc-plan.md`](plan/mc-plan.md), and the test matrix with its findings
+log F1–F14 in [`plan/solver-test-matrix-plan.md`](plan/solver-test-matrix-plan.md)
+— those files stay the source of truth for *why* a decision was made; this
+manual explains *what the code does and how to use it* and cross-references
+the plans instead of duplicating the log.
 
 **Contents**
 
@@ -20,14 +32,15 @@ it* and cross-references the plan instead of duplicating the log.
   6. [Short-characteristics transport](#6-short-characteristics-transport)
   7. [Boundary conditions](#7-boundary-conditions)
   8. [Iteration scheme and 1D Ng acceleration](#8-iteration-scheme-and-1d-ng-acceleration)
+  9. [Monte Carlo solver family](#9-monte-carlo-solver-family)
 - [Part II — Usage](#part-ii--usage)
-  9. [Environment setup](#9-environment-setup)
-  10. [Module tour](#10-module-tour)
-  11. [Worked end-to-end example](#11-worked-end-to-end-example)
-  12. [Runner scripts](#12-runner-scripts)
-  13. [Condensed API reference](#13-condensed-api-reference)
-  14. [Verification invariants](#14-validation-invariants)
-  15. [Known limitations and performance](#15-known-limitations-and-performance)
+  10. [Environment setup](#10-environment-setup)
+  11. [Module tour](#11-module-tour)
+  12. [Worked end-to-end example](#12-worked-end-to-end-example)
+  13. [Runner scripts](#13-runner-scripts)
+  14. [Condensed API reference](#14-condensed-api-reference)
+  15. [Verification invariants and the test matrix](#15-verification-invariants-and-the-test-matrix)
+  16. [Known limitations and performance](#16-known-limitations-and-performance)
 
 ---
 
@@ -53,6 +66,16 @@ section 1; do not change them without updating `plan/plan.md`):
 The spatial domain is an axis-aligned **cuboid** (`rt3d.geometry.cuboid`):
 $z = z_1$ is space (top), $z = z_0$ is the ground plane (bottom), $x$ and $y$
 wrap periodically.
+
+Both solver families implement exactly these assumptions on the same grids,
+fields and boundary conditions, so their results are differenced cell-by-cell
+(the pytest matrix, §15):
+
+| family | entry points | angular treatment | typical question |
+|---|---|---|---|
+| **short characteristics** | `rt3d.solver.lambda_iteration` | icosahedral quadrature (§4) | full $I$/J/F field of a source field |
+| **Monte Carlo, forward** | `rt3d.mc.forward.j_mc` (stage 1), `radiance_from_source` (stage 2) | continuous — HG inverse-CDF, no quadrature in transport | same fields by particle transport; angle-exact at large $g$ |
+| **Monte Carlo, adjoint** | `rt3d.mc.backward.backward_detector_mc` | continuous; quadrature only as detector-cone binning | radiance **at a detector** (all-sky at one point) |
 
 ## 2. Governing equation
 
@@ -218,7 +241,15 @@ $\sum_j W_{ij} = 1$ exactly. This enforces exact discrete conservation of
 isotropic radiation; at $g = 0$ the raw row sums are already exactly 1, so
 isotropic results are unchanged. The same convention is used for the beam
 first-scatter row (§3). The price is a modified discrete phase function; the
-angular error it introduces is part of the 42-ordinate error budget (§15).
+angular error it introduces is part of the 42-ordinate error budget (§16).
+
+**The MC family does not transport on the quadrature.** `rt3d.mc.sources`
+samples the HG phase function *exactly* by inverse CDF (§9), so MC transport
+has no 42-ordinate resolution limit at large $g$ and needs no delta-M; the
+icosahedral grid enters the MC solvers only as **tally binning** (stage-2
+radiance columns, all-sky detector cones) — and the difference between the
+SC quadrature-normalized and the analytic MC beam source is a measured,
+documented 42-ordinate effect (finding F14, §9 and §16).
 
 ## 5. Spatial discretization — unigrid and octree
 
@@ -280,7 +311,7 @@ through the octree, `octree.march_octree`), once per ordinate, and reuses the
 segments in every iteration. The only remaining path error is the octree's
 own resolution of the piecewise-constant field. On the unigrid the
 lattice-stencil chain is kept (its error is the documented invariant-5 effect,
-§14).
+§15).
 
 > **Performance note** (plan/optimization-plan.md): with `numba` installed
 > (auto-detected, `rt3d.jit`), the octree path *fuses* the DDA march with the
@@ -315,14 +346,17 @@ target center) is **exact** for piecewise-constant sources. The code uses
 
 ```mermaid
 flowchart TD
-    A["one ordinate Omega_i"] --> B{"grid type?"}
-    B -->|"unigrid"| C["stencil_for_direction + subsegments_uniform + build_chain (once per ordinate)"]
+    A["one ordinate Omega_i"] --> B{"grid + transport option?"}
+    B -->|"unigrid, transport='chain' (default)"| C["stencil_for_direction + subsegments_uniform + build_chain (once per ordinate)"]
+    B -->|"unigrid, transport='sc'"| K["build_sc_chain: single-cell SC stencil + gap/target segments (once per ordinate)"]
     B -->|"octree"| D["precompute_octree_march: exact backward DDA march from every leaf center to domain entry (once per ordinate)"]
     C --> E["sweep_direction: boundary-entry root chains, then topological BFS waves"]
+    K --> L["sweep_direction_sc: layer loop along the entry axis, bilinear 4-point interpolation at the face point"]
     D --> F["sweep_direction_octree_exact: block cumsum prefixes + np.add.at"]
     E --> G["I at all cell/leaf centers for this ordinate"]
+    L --> G
     F --> G
-    G --> H["sweep_all / sweep_all_octree_exact loop over all ordinates"]
+    G --> H["sweep_all / sweep_all_sc / sweep_all_octree_exact loop over all ordinates"]
 ```
 
 **Unigrid (`characteristics.build_chain` + `transport.sweep_direction`).**
@@ -353,6 +387,26 @@ default, `jit=None`) the march and this recursion are instead **fused per ray
 in compiled parallel code** (`rt3d.jit`): no segment arrays are materialised
 and each sweep re-marches — cheaper overall than storing and re-reading tens
 of millions of segments per ordinate.
+
+**Unigrid single-cell SC (`rt3d.short_characteristics`,
+`lambda_iteration(transport="sc")`).** A second, independent unigrid
+transport — the DOIT-style single-cell short characteristics of
+`plan/plan-sc-unigrid.md`. For one ordinate the upwind node is chosen on the
+axis $a = \arg\max|\Omega_a|/h_a$; the characteristic into the cell center is
+split into a **gap segment** from the four upwind stencil nodes to the entry
+face point $p$ plus the **target segment** $p \to$ center, each integrated
+with the piecewise-constant formal solution, and the four propagated node
+values are combined by bilinear 4-point interpolation at $p$
+(`build_sc_chain` + `sweep_direction_sc`, vectorized as a layer loop along
+the entry axis). The gap segment is essential: without it the interpolation
+extrapolates, the face→upwind-center half cell is never integrated, and the
+transmittance error is $O(1)$ and scale-invariant. With it, z-entry
+characteristics reproduce $e^{-\tau}$ to machine precision; oblique (x/y-entry)
+ordinates keep a bounded angular stencil error of the same character as the
+chain method's grazing-ordinate error (§15, invariant 5). The scheme is
+unigrid-only (`transport="sc"` with an octree grid raises
+`ValueError`); `scripts/compare_transport.py` runs chain vs sc vs octree
+side by side (plan/compare-transport-plan.md).
 
 `transport.sweep_all` / `sweep_all_octree_exact` loop over all ordinates;
 the source $S$ may be direction-dependent (`(n_cells, N_dir)`), which is what
@@ -414,7 +468,11 @@ anisotropic scattering requires.
 - **Variable surface hook:** `ground_surface(height=f(x, y))` is accepted
   (`is_variable()`), but the transport supports only a flat ground at the
   domain bottom — `lambda_iteration` raises `NotImplementedError` for a
-  variable surface (phase 6 hook, see §15).
+  variable surface (phase 6 hook, see §16).
+
+The MC family (§9) implements the **same** ground law — `rt3d.mc.ground`
+calls `rt3d.transport.ground_inflow`, so SC and MC share the boundary
+condition by construction — with the same variable-surface guard.
 
 ## 8. Iteration scheme and 1D Ng acceleration
 
@@ -580,33 +638,218 @@ delta-M $M=1$, Ng → Ng + delta-M $M=1$):
 `tests/test_delta_m.py::test_solver_acceleration_delta_M1` at
 $n_z = 8$, $\mathrm{tol} = 10^{-6}$, $g = 0.95$: 62 → 12.)
 
+## 9. Monte Carlo solver family
+
+The `rt3d.mc` package (plan/mc-plan.md, phases M0–M6) transports the same
+problem — same grids, same `boundary_conditions` + `ground`, same
+$\kappa_e/\kappa_s/g$ conventions — by **Woodcock null-collision particle
+transport** instead of ordinate sweeps. Transport is **angle-exact** (HG
+inverse-CDF; no quadrature in the collision physics), every run is seeded
+(PCG64) and carries 1-$\sigma$ batch error bars, and every solver is
+differenced cell-by-cell against the SC family in the test matrix (§15).
+
+```mermaid
+flowchart TD
+    A1["solver A stage 1 — j_mc(stage1='lambda' or 'explicit'): diffuse J, F by particle transport"] --> S2["stage2_source(J) = (1-omega)B + omega J + beam first scatter"]
+    S2 --> A2["solver A stage 2 — radiance_from_source: I(cell, ordinate) on the SC ray set"]
+    A1 -.->|"independent closed-RTE solve, no stage-1 J"| B["solver B — backward_detector_mc / backward_all_sky: adjoint radiance at a detector"]
+    A2 --> X["differencing vs lambda_iteration (matrix tiers T2/T3)"]
+    B --> X
+```
+
+**Tracking core (`rt3d.mc.tracking`, M0).** One flight sampler and event
+decision shared by every solver: sample a distance from a majorant
+$\kappa_{\max} \ge \kappa_e$, DDA through the grid, then `event_decision`
+classifies the collision as scatter / true absorption / **null** (null:
+direction and weight unchanged, flight continues). Two majorant modes:
+`mode="cell"` (default) sets $\kappa_{\max} = \kappa_e(\text{cell})$ — on a
+piecewise-constant grid every collision is real, but the code stays a
+Woodcock tracker; `mode="global"` uses a domain-wide majorant so vacuum
+regions produce *real* null collisions and the whole photon batch advances
+one vectorized flight at a time. The DDA walkers (`walk_lattice`,
+`walk_octree`) reproduce the SC marches `geometry.march_lattice` /
+`octree.march_octree` **segment-for-segment** (same lattice formulas, same
+periodic-wrap snap), so MC and SC see exactly the same geometry.
+
+**Sources and sampling (`rt3d.mc.sources`, M0/M1).** The HG phase function
+is sampled *exactly* by inverse CDF:
+
+$$
+q = \frac{2\,g\,u}{1-g^2} + \frac{1}{1+g},
+\qquad
+\cos\Theta = \frac{1+g^2-q^{-2}}{2\,g},
+\qquad
+\text{azimuth} \sim U[0,2\pi),
+$$
+
+monotone in $u$ for either sign of $g$, isotropic limit at $g = 0$. This is
+the companion of verification invariant 2: HG samples reproduce the
+`hg_matrix` quadrature moments to quadrature accuracy
+(`tests/test_mc_sources.py`). Birth positions from inhomogeneous source
+rates come from `sample_births` (categorical over cells, or chained *null
+source events* — provably the same density); face populations use
+cosine-weighted inward directions (`face_inflow_directions`, the
+crossing-rate measure $|\mu|\,d\Omega$); the beam seeds on its entry face
+(`beam_seed`).
+
+**Tallies and error bars (`rt3d.mc.estimators`).** Track-length tally of
+the fluence,
+
+$$
+J_c = \frac{1}{4\pi V_c}\sum_k w_k\,\ell_{c,k},
+\qquad
+F_c = \frac{1}{V_c}\sum_k w_k\,\ell_{c,k}\,\boldsymbol{\Omega}_k,
+$$
+
+exact for a particle population killed at true absorption. Weights are
+*powers* (intensity × area): face source $w = \pi A\,I_{\mathrm{in}}/n$,
+beam $w = F_0\,|\boldsymbol\Omega_{\mathrm{sun}}\cdot
+\mathbf n_{\mathrm{face}}|\,A/n$, volume source $w = 4\pi Q/n$ — the tally
+then carries intensity units. Histories are grouped into `n_batches`
+contiguous batches and $\sigma$ is the batch-mean standard error
+(`ddof=1`); the plan's acceptance bands are 2σ. Note finding **F3**:
+*per-cell* MC z-scores are heavy-tailed — the matrix tests use pooled
+statistics (`tests/matrix_stats.py`); never read a single-cell z-score as a
+test.
+
+**Solver A stage 1 (`rt3d.mc.forward.j_mc`, M1).** Two variants of the same
+physics:
+
+- `stage1="lambda"` (default) — the DOIT twin of `lambda_iteration`: the
+  transport operator is applied to the current scalar source, particles fly
+  with *removal only* (the scattering is done by the outer iteration),
+  $S^{n+1} = (1-\omega)B + \omega J^n +$ fixed boundary/beam terms; same
+  history/tol bookkeeping, and `ng=True` applies the same 1D Ng
+  accelerator. **Convergence caveat (finding F5):** with fresh sampling per
+  iteration the residual stalls at the tally-noise floor (`history[-1]` ≈
+  0.2 on the cloud octree) — validate this variant on the agreement of its
+  $J$ field, never on `converged`. `crn=True, birth="uniform"` freezes the
+  birth stream (common random numbers) but can diverge on inhomogeneous
+  fields.
+- `stage1="explicit"` — classic generation-based analog MC
+  (`rt3d.mc.tracking.track_histories`): physical scattering regenerates the
+  diffuse field inside the history, no outer iteration; the unscattered
+  beam is tallied into a separate `J_direct`, so `J` stays the *diffuse*
+  mean intensity like the SC field.
+
+The beam is a **particle stream** seeded on its entry face (plus first-
+scatter children in the λ variant), not an analytic source term;
+`rt3d.source.beam_scattering_source` and $\tau_b$ stay available as
+analytic cross-checks. The result dict mirrors the SC one — `J, sigma_J,
+F, sigma_F, heating, history, n_iter, converged` — plus traceability
+(`seed`, `n_histories`, `n_null`, `n_collisions`, …).
+
+**Solver A stage 2 (`radiance_from_source` + `stage2_source`, M2).**
+Radiance $I(\text{cell},\Omega_i)$ of a *fixed* source on a ray set
+identical to the SC sweeps — one backward ray per cell/leaf center per
+icosahedral ordinate:
+
+- `estimator="next_flight"` (default): `n_histories` backward flights per
+  ray score $S_{\text{total}}$ at their first *real* collision (nulls
+  continue); unbiased in both majorant modes, no $/\kappa_{\max}$ factor.
+- `estimator="deterministic"`: the exact per-segment line integral — the
+  zero-noise limit, and on the octree **identical to the SC sweep to
+  1.2e-12** (tier T2, finding F2). This is the hinge that separates
+  transport discretization from statistical noise in every SC-vs-MC
+  comparison.
+
+**Solver B — adjoint detector MC (`rt3d.mc.backward`, M3).** Answers "what
+reaches this detector": adjoint histories fly *backwards* from a point or
+plane-aperture detector (`detector = {"point": ...}` or
+`{"plane": {...}}` + `omega0` + `cone` + `n_seeds`) along $-\Omega$; at
+every real collision of the closed-RTE walk a history scores
+
+$$
+w\left[(1-\omega)B(\mathbf r)
++\omega\,F_0\,e^{-\tau_b(\mathbf r)}\,
+\Phi_{\mathrm{HG}}(\boldsymbol\Omega_{\mathrm{sun}}\to\boldsymbol\Omega_f)\right],
+$$
+
+with the *forward* intensity direction $\boldsymbol\Omega_f$ (HG
+reciprocity: the adjoint kernel is the same HG about the reversed
+direction); the walk continues at scattering and terminates at true
+absorption, and scores the face inflow where it exits the domain. No
+stage-1 $J$ is used — solver B is an **independent solve of the closed
+problem** (the plan sketch's "$\omega J$ at every collision" would
+re-expand the already-scattered field at all orders and over-count —
+deviation logged in `plan/plan.md`). `backward_all_sky` runs one detector
+per upward icosahedral ordinate; keep `cone_scale` small (default 0 =
+exact node direction, the mode that differences against `I[cell,
+ordinate]`): full equal-area caps cross the horizon near $\mu \approx 0$
+and mix in downward radiance (measured 0.3 vs 0.02 at $\mu \approx 0.1$).
+
+**Ground (phase M6, `rt3d.mc.ground`).** `ground_radiance` calls
+`rt3d.transport.ground_inflow` — SC and MC share the ground law **by
+construction**. The MC side adds the sampling machinery: ground-emission
+and reflected-beam face populations seeded from the per-column radiance
+(`sample_ground_face`), $F_\downarrow$ measured from flight segments
+(`down_irradiance_from_segments`, the twin of
+`transport.downward_irradiance`), and albedo feedback either as analog
+boundary scattering in the explicit chain or as a re-seeded iterated
+inflow in the λ variant (the exact twin of the SC "downward ordinates
+first" ordering). The adjoint walk scores the ground source and continues
+cosine-weighted upward with $\times A_g$.
+
+**Variance reduction and the numba path (M4).** `implicit_capture=True`
+never terminates a walk at absorption — every real collision multiplies
+the weight by the collision albedo $\omega$ (unchanged expectation,
+measured $\sigma$ gain ≈ 3× at $\omega = 0.5$, ≈ 1.8× at $\omega = 0.9$);
+`roulette_floor` (Russian roulette) requires it. The compiled per-photon
+fast path is `rt3d.mc.jitmc.sample_collisions_jit`, selected with
+**`jit=True` — opt-in here**, unlike the SC family's auto-default
+`jit=None`: it is statistically equivalent but uses a *different RNG
+stream* (numba's generator, not PCG64), so a seeded `jit=True` run does
+not reproduce the NumPy-path numbers.
+
+**Measured cross-family facts** (findings log in
+`plan/solver-test-matrix-plan.md`): the T2 identity above; **F11** — the
+unigrid `chain` transport carries an $h$-independent path error (volume-
+mean $J$ +3.1% over the exact-march value), which MC-vs-SC comparisons
+must not blame on the particles; **F14** — SC's quadrature-normalized beam
+first-scatter source sits a factor $1/s(g)$ below the MC analytic-HG one at
+large $g$ (raw quadrature defect $s(g) = 4.0$–8.9 at $g = 0.9$–0.925 on 42
+ordinates), so beam-case per-ordinate SC-vs-MC comparisons on the
+development grid are F14-limited, not noise-limited; wall-time
+expectation (M4 table, `scripts/mc_phase4_walltimes.py`): SC wins
+whole-domain stage-1 fields, MC wins stage-2/all-sky-at-a-point queries.
+
 ---
 
 # Part II — Usage
 
-## 9. Environment setup
+## 10. Environment setup
 
 Mamba/conda environment **`pyarts`**. There is no `mamba`/`conda` on `PATH`
 in a plain shell — call the environment interpreter by absolute path:
 
-```powershell
-& C:\Users\fredd\miniforge3\envs\pyarts\python.exe <script.py>
+```sh
+# macOS / Linux
+~/miniforge3/envs/pyarts/bin/python <script.py>
 ```
 
-> **⚠ BLAS/openblas PATH gotcha — read this first.**
-> The env's numpy links against the `libcblas.dll` shim, which *delay-loads*
-> `openblas.dll` from `C:\Users\fredd\miniforge3\envs\pyarts\Library\bin`.
-> Running the interpreter by absolute path **without activating the env**
-> leaves that directory off `PATH`, and every matrix product then
-> hard-crashes the process with exit code **`-1066598273`**
-> (`0xC06D007F`, delay-load failure) — **no traceback**. Prepend it before
-> running anything that does a matmul (which is everything in `rt3d`):
+```powershell
+# Windows
+& "$env:USERPROFILE\miniforge3\envs\pyarts\python.exe" <script.py>
+```
+
+> **⚠ BLAS/openblas PATH gotcha — Windows only, read this first.**
+> On Windows the env's numpy links against the `libcblas.dll` shim, which
+> *delay-loads* `openblas.dll` from `...\envs\pyarts\Library\bin`. Running
+> the interpreter by absolute path **without activating the env** leaves
+> that directory off `PATH`, and every matrix product then hard-crashes the
+> process with exit code **`-1066598273`** (`0xC06D007F`, delay-load
+> failure) — **no traceback**. Prepend it before running anything that does
+> a matmul (which is everything in `rt3d`):
 >
 > ```powershell
-> $env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
+> $env:Path = "$env:USERPROFILE\miniforge3\envs\pyarts\Library\bin;" + $env:Path
 > ```
+>
+> On macOS/Linux the absolute interpreter path works as-is — no `PATH` fix
+> needed.
 
-Installed packages (verified):
+Installed packages (reference versions — they may differ slightly between
+machines; confirm with the sanity check below):
 
 | Package | Version |
 |---|---|
@@ -618,29 +861,48 @@ Installed packages (verified):
 | h5py | 3.16.0 |
 | pyarts3 | 3.0.0.dev10 |
 | pytest | 9.1.1 |
+| numba | 0.66.0 (+ llvmlite 0.48.0) |
+| pyvista | 0.49.1 (with vtk) + trame-pyvista 0.2.1 |
+| markdown | 3.11.1 (md → HTML for the browser print-to-PDF doc regeneration) |
 
-**Not installed:** `numba`, `pyvista` (verified `ModuleNotFoundError`). The
-solver is pure NumPy and does not need them (§15).
+`numba` drives the compiled fast paths of `rt3d.jit` (SC) and
+`rt3d.mc.jitmc` (MC): auto-detected (`rt3d.jit.HAVE_NUMBA`), with a
+bit-identical NumPy reference fallback for every kernel (§16). `pyvista` is
+optional (3D figures in §12, HTML scene export via trame). The solver core
+itself needs only numpy (+ scipy in `ng1d`); never add a new dependency
+without installing it into `pyarts` first.
 
 Quick sanity check:
 
-```powershell
-& C:\Users\fredd\miniforge3\envs\pyarts\python.exe -c "import numpy, scipy; print(numpy.__version__, scipy.__version__)"
+```sh
+# macOS / Linux
+~/miniforge3/envs/pyarts/bin/python -c "import numpy, scipy; print(numpy.__version__, scipy.__version__)"
 ```
 
-Running the test suite (110 tests, ≈ 6 min):
+Running the tests — **341 tests** in `tests/` (per-module suites plus the
+cross-solver matrix tiers T0–T5, §15; `pytest.ini` defines the markers
+`slow`, `mc`, `reference`):
 
-```powershell
-$env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
-& C:\Users\fredd\miniforge3\envs\pyarts\python.exe -m pytest tests -q
+```sh
+# macOS / Linux
+~/miniforge3/envs/pyarts/bin/python -m pytest -q -m "not slow"  # 330 tests, ≈ 29 min measured (macOS/arm64)
+~/miniforge3/envs/pyarts/bin/python -m pytest -q                # adds the 11 slow-tier tests (ladder, fine reference)
 ```
 
+```powershell
+# Windows (PATH fix first!)
+& "$env:USERPROFILE\miniforge3\envs\pyarts\python.exe" -m pytest -q
+```
+
+Per-tier runtime budgets (measured/extrapolated, plan/solver-test-matrix-plan.md
+§10): T0+T1+T2 ≈ 8–12 min, T3+T4 ≈ 15–25 min, the `slow` T5 ladder ≈ 30–50 min;
+`-m "slow or reference"` extends the full run to ≈ 1.5–2 h.
 `tests/conftest.py` puts the repo root on `sys.path`, so `import rt3d` works
 from the repo root in scripts and tests alike. Plots must not block: use
 `matplotlib.use("Agg")` and `fig.savefig("plot/...")`; figure output goes to
 `plot/`.
 
-## 10. Module tour
+## 11. Module tour
 
 One section per `rt3d` module, with the real signatures.
 
@@ -726,6 +988,29 @@ One section per `rt3d` module, with the real signatures.
   max_hops=8) -> chain` — **reference only, not used by the solver** (§5):
   best-aligned center-to-center connection with cycle peeling; kept for
   phase-3 validation (`scripts/phase3_octree.py` cell 1).
+
+### `rt3d.short_characteristics` — unigrid single-cell SC (`transport="sc"`)
+
+Second, independent unigrid transport (§6, plan/plan-sc-unigrid.md); the
+solver selects it with `lambda_iteration(transport="sc")`.
+
+- `sc_stencil(omega, h) -> dict` — entry axis $a = \arg\max|\Omega_a|/h_a$,
+  propagation sense `sigma`, face-segment length `t_f = h_a/(2|\Omega_a|)`,
+  the 4 upwind bilinear node `offsets` and `weights` (sum 1).
+- `build_sc_chain(grid, omega, periodic_box=None) -> sc` — per-ordinate
+  chain dict (`a`, `sigma`, `t_f`, `weights`, layer-grouped `order` +
+  `slices`, `node_idx`, `node_face`, `wrap`, `n_layers`), built once per
+  ordinate like `build_chain`.
+- `sweep_direction_sc(grid, sc, kappa_e, S, bc, bottom_I=None,
+  wrap_tol=1e-12, max_passes=None) -> I (n_cells,)` — one ordinate sweep as
+  a layer loop along the entry axis (§6); on periodic x/y entry axes the
+  layer loop runs ring passes until the wrap boundary converges
+  (`max_passes` cap, default `max(4 n_a, 64)` — the bilinear stencil's
+  ring operator needs more than $n_a$ passes for grazing ordinates in
+  near-vacuum rings).
+- `sweep_all_sc(grid, direction_grid, kappa_e, S, bc, periodic_box=None,
+  chains=None, n_jobs=1) -> (I, chains)` — all ordinates; compiled via
+  `rt3d.jit.sc_sweep_jit` when numba is available.
 
 ### `rt3d.transport` — sweeps, boundary conditions, beam
 
@@ -830,6 +1115,9 @@ locked by `tests/test_jit.py`.
   `(n_cells,)`; `beam = {"omega_sun": (3,) unit, "F0": float}` or `None`;
   `ng` is `None`/`False` (plain LI), `True` (build `ng1d(grid)`) or a
   prepared `ng1d`; `delta_M = 0` off, `>= 1` delta-M scaling (§8);
+  `transport` selects the **unigrid** sweep scheme (§6): `"chain"` (the
+  lattice-stencil chain, default) or `"sc"` (single-cell SC; raises with an
+  octree grid);
   `jit=None` auto-selects the fused numba octree march (§5 performance
   note); `n_jobs > 1` sweeps ordinates in parallel threads
   (plan/optimization-plan.md P3).
@@ -854,24 +1142,110 @@ locked by `tests/test_jit.py`.
   Note there is **no `SolverConfig`** class (that name exists only in
   `plan/plan.md`); all configuration is via the keyword arguments above.
 
+### `rt3d.mc` — Monte Carlo solver family (theory §9, plan/mc-plan.md)
+
+- `rt3d.mc.tracking`:
+  `sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s,
+  g=0.0, mode="cell", kappa_max=None, periodic_box=None, seed=0,
+  scatter=True, max_collisions=20000, path_cap=None, jit=False)` — the
+  shared Woodcock flight sampler: per-history collision records
+  `(hist_idx, cell_idx, length)` + collision type/direction arrays;
+  `scatter=False` implements the removal-only transport operator of the
+  λ-variant. `walk_lattice(starts, directions, grid, budgets=None,
+  periodic_box=None)` / `walk_octree(starts, directions, oct, budgets,
+  periodic_box=None)` — pure geometric DDA traversals (no collisions),
+  segment-for-segment identical to the SC marches. Helpers:
+  `flight_distance(u, kappa_max)`, `event_decision(u, kappa_max, kappa_s,
+  kappa_e)`, `flight_budget(p, d, grid, periodic_box=None, path_cap=None)`,
+  `flight_segments(starts, directions, ends, grid, periodic_box=None)`,
+  `path_integral_from_segments(seg_ray, seg_cell, seg_len, cell_field,
+  n_rays)`; event codes `EV_EXIT/EV_SCATTER/EV_ABSORB/EV_NULL`.
+  `track_histories(starts, directions, grid, kappa_e, kappa_s, tally,
+  ..., g, mode, implicit_capture, roulette_floor, jit, ground, ...)` —
+  analog generation chain (stage1="explicit", §9).
+- `rt3d.mc.sources`: `hg_cos_theta(u, g)` / `hg_directions(d_in, u_cos,
+  u_az, g)` / `hg_scatter_directions(d_in, cells, g, rng)` — HG inverse-CDF
+  (§9 formula); `isotropic_directions(n, rng)`,
+  `face_inflow_directions(n, axis, side, rng)` (cosine-weighted inward),
+  `face_points(n, box, axis, side, rng, eps=None)`, `face_area(box, axis)`,
+  `sample_births(n, grid, rate, method="categorical"|"null_collision",
+  seed=0)` — birth positions from a per-cell rate, with the null-source-
+  event count returned as diagnostic; `beam_seed(n, box, omega_sun, rng)`.
+- `rt3d.mc.estimators`: `class track_tally(n_cells, n_histories,
+  n_batches=100, flux=True)` — track-length accumulator: `add(hist, cell,
+  length, weight, direction=None)` deposits a flight's segments,
+  `merge(other)` combines chains, `result(volumes)` returns
+  `J/sigma_J` (and `F/sigma_F`) with history-batch error bars (§9);
+  `cell_volumes(grid)`,
+  `n_cells_of(grid)`; `heating_rate(kappa_a, B, J)` — **argument order
+  swapped vs `rt3d.diagnostics.heating_rate(kappa_a, J, B)`** (finding F8
+  in the findings log — do not swap by reflex).
+- `rt3d.mc.forward`:
+  `j_mc(grid, kappa_e, kappa_s, B, bc, g=0.0, periodic_box=None, beam=None,
+  stage1="lambda", n_histories=20000, n_boundary_histories=20000,
+  n_beam_histories=20000, n_ground_histories=None, n_batches=100, seed=0,
+  mode="cell", kappa_max=None, n_iter=200, tol=1e-8, ng=None, crn=False,
+  birth="source", max_collisions=20000, path_cap=None, tally_flux=True,
+  implicit_capture=False, roulette_floor=None, jit=False) -> result` —
+  stage 1 (§9); result keys `J, sigma_J, F, sigma_F, heating, history,
+  s_max_history, n_iter, converged, J_direct, J_direct_analytic, J_total,
+  J_fixed, n_null, n_null_source, n_generations, n_collisions, capped,
+  n_truncated` + traceability (`stage1, mode, seed, n_histories, ...`).
+  `stage2_source(grid, dg, kappa_e, kappa_s, B, J, g=0.0, beam=None,
+  periodic_box=None)` — fixed source `(n_cells,)` or `(n_cells, N_dir)`
+  with beam; `radiance_from_source(grid, dg, kappa_e, S_total, bc,
+  periodic_box=None, estimator="next_flight"|"deterministic",
+  n_histories=25, n_batches=10, seed=0, mode="cell", kappa_max=None,
+  jit=False, ground_I=None) -> {"I", "sigma_I", "J", ...}` — stage 2 (§9).
+- `rt3d.mc.backward`:
+  `backward_detector_mc(grid, kappa_e, kappa_s, B, bc, detector, g=0.0,
+  beam=None, tau_b=None, periodic_box=None, n_batches=100, seed=0,
+  mode="cell", kappa_max=None, max_collisions=20000, path_cap=None,
+  implicit_capture=False, roulette_floor=None, jit=False)` — adjoint
+  radiance at one detector (`detector` spec in §9), returns `I`/`sigma_I`
+  + walk statistics; `backward_all_sky(..., point, n_seeds=20000,
+  cone_scale=0.0, ...)` — one detector per upward ordinate, returns
+  per-ordinate `I/sigma_I` on `up_idx`; `all_sky_cone_half(dg, i)` —
+  equal-area cap half-angle of ordinate $i$.
+- `rt3d.mc.ground` (M6): `bottom_columns(grid)`,
+  `ground_radiance(grid, ground, F_down=None, beam_irr=0.0)` (calls
+  `rt3d.transport.ground_inflow`), `ground_beam_irradiance(...)`,
+  `sample_ground_face(n, grid, I_col, rng)`, `ground_face_weight(...)`,
+  `down_irradiance_from_segments(rec, weights, cols)`,
+  `ground_column_lookup(grid, points, cols)`, `ground_or_raise(bc)`.
+- `rt3d.mc.jitmc`: `jit_mc_usable(grid, periodic_box=None)`,
+  `sample_collisions_jit(...)` — compiled clone of `sample_collisions`
+  (statistically equivalent, different RNG stream, §9).
+
 ### `rt3d.diagnostics` — diagnostics
 
 - `heating_rate(kappa_a, J, B)` — net heating rate per volume,
   $4\pi\kappa_a (B - J)$ (positive = radiation gains energy from matter).
+  (The MC twin `rt3d.mc.estimators.heating_rate` takes `(kappa_a, B, J)`.)
+- `cell_volumes(grid) -> (n_cells,)` — `hx hy hz` on the unigrid,
+  `(2 half)^3` per octree leaf (the leaves tile the domain).
 - `flux_divergence(grid, F) -> per-cell div F` — central differences,
-  periodic wrap in x/y, one-sided at top/bottom (uniform unigrid only).
-- `energy_balance(grid, I, dg, kappa_a, B) -> dict` — global closure on the
-  unigrid: `out_top`, `out_bottom` (outward power through the faces, net
-  $F_z$ second-order extrapolated from the boundary layers), `heating`
-  ($\int 4\pi\kappa_a (B-J)\,dV$),
-  `residual = out_top + out_bottom − heating`. With a beam, subtract the
+  periodic wrap in x/y, one-sided at top/bottom; **works on both grids**
+  (octree: side-leaf location along each axis, F7).
+- `face_powers(grid, I, dg) -> dict` — outward power `out_top` /
+  `out_bottom` through the horizontal faces (net $F_z$ second-order
+  extrapolated from the boundary layers on the unigrid, per-boundary-leaf
+  extrapolation on the octree) plus `flux_top` / `flux_bottom` / `area`.
+- `angular_variance(I, dg) -> (n_cells,)` —
+  $\frac{1}{4\pi}\sum_i w_i (I_i - J)^2$, the angular anisotropy of the
+  field on the quadrature.
+- `energy_balance(grid, I, dg, kappa_a, B) -> dict` — global closure on
+  **any grid** (F7): `out_top`, `out_bottom` (via `face_powers`), `heating`
+  ($\int 4\pi\kappa_a (B-J)\,dV$ with `cell_volumes`),
+  `residual = out_top + out_bottom − heating`, `relative` = residual scaled
+  by the larger of face power and heating. With a beam, subtract the
   first-scatter input $\int \kappa_s F_0 e^{-\tau_b}\,dV$ from the residual
-  to close the diffuse-field balance (§11, §14 invariant 4).
+  to close the diffuse-field balance (§12, §15 invariant 4).
 - `allsky(grid, I, dg, face="top") -> dict` — outgoing intensity images at a
   horizontal face for every leaving ordinate: `omega (n_out,3)`,
   `weights (n_out,)`, `images (n_out, ny, nx)`; `face="top"` uses upward
   ordinates at the top layer, `face="bottom"` downward ordinates at the
-  bottom layer (uniform unigrid).
+  bottom layer (uniform unigrid only).
 
 ### `rt3d.cases` — test cases
 
@@ -884,10 +1258,20 @@ locked by `tests/test_jit.py`.
   peaks at 1.0 (uncapped, faithful to `class_test.py`) or `omega_cap`; local
   $g$ peaks ≈ 0.952. `class_test.py` stores `albedo`; this case converts to
   $\kappa_s = \omega_{\mathrm{local}}\cdot\kappa_e$.
-- Note: `slab_1d` / `clear_sky` from `plan/plan.md` **do not exist as case
-  modules**; the plane-parallel slab lives inside `scripts/phase2_slab.py`.
+- `slab_1d` module (used by both `scripts/phase2_slab.py` and
+  `scripts/mc_forward_slab.py`, so SC and MC see exactly the same slab):
+  `slab_grid(tau=5.0, kappa_e=1.0, nz=50, nxy=4) -> (grid, box, hz)` —
+  cubic-cell slab, $n_z$ layers of $\tau/n_z$ each, periodic x/y;
+  `slab_profile(grid, nz)` — vertical profile selector (column (1,1) of the
+  flat k-major field); references `d1o_J(kappa_e, omega, hz, nz, top_I=1.0,
+  n_iter=4000, tol=1e-12)` — 1D discrete ordinates on the *same* z cells
+  with 64 Gauss–Legendre $\mu$ levels (the strong angular reference) and
+  `two_stream_J(kappa_e, omega, z0, z1, zc, top_I=1.0)` — analytic
+  Eddington two-stream with Marshak BCs (context curve only).
+- Note: `clear_sky` from `plan/plan.md` still **does not exist as a case
+  module**.
 
-## 11. Worked end-to-end example
+## 12. Worked end-to-end example
 
 Gaussian cloud + Lambertian ground + solar beam, on both grids, Ng
 accelerated. The script below was **executed with the pyarts interpreter and
@@ -920,8 +1304,8 @@ flowchart LR
 
 ```python
 # gaussian_cloud_example.py — run from the repo root:
-#   Windows:      $env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
-#                 & C:\Users\fredd\miniforge3\envs\pyarts\python.exe gaussian_cloud_example.py
+#   Windows:      $env:Path = "$env:USERPROFILE\miniforge3\envs\pyarts\Library\bin;" + $env:Path
+#                 & "$env:USERPROFILE\miniforge3\envs\pyarts\python.exe" gaussian_cloud_example.py
 #   macOS/Linux:  ~/miniforge3/envs/pyarts/bin/python gaussian_cloud_example.py
 import time
 
@@ -1023,7 +1407,7 @@ print(f"top-of-domain mean F_z: unigrid "
       f"{res['F'][-grid.ny*grid.nx:, 2].mean():.4f}, "
       f"octree {res_oct['F'][top_layer, 2].mean():.4f}")
 
-# diffuse-field energy closure (phase-5 recipe, §14 invariant 4)
+# diffuse-field energy closure (phase-5 recipe, §15 invariant 4)
 kappa_a = kappa_e - kappa_s
 bal = energy_balance(grid, res["I"], dg, kappa_a, B)
 tau_b = beam_optical_depth(grid, beam["omega_sun"], kappa_e, periodic_box=box)
@@ -1315,7 +1699,7 @@ staircase still visible on the surfaces. Right: volume rendering of $J$ with
 the opacity transfer function *inverted* (low $J$ $\to$ high opacity), so the
 dense dark core is the radiation shadow of the cloud and the beam path lights
 up around it. Both panels come from the octree solution resampled onto the
-$64^3$ lattice of finest-cell centres (§11 code), domain box outlined:
+$64^3$ lattice of finest-cell centres (§12 code), domain box outlined:
 
 ![3D view: kappa_e isosurfaces and a volume rendering of J from the octree solution](plot/manual_example_3d.png)
 
@@ -1327,7 +1711,7 @@ Interpreting the result dict and the diagnostics:
   iteration $k$.
 - **unigrid vs octree J**: the ~10–30% band-mean differences are the
   *unigrid* lattice-stencil path error for grazing ordinates in the strongly
-  heterogeneous cloud (verification invariant 5, §14) — the octree
+  heterogeneous cloud (verification invariant 5, §15) — the octree
   exact-characteristic result is the better one; the top-of-domain flux,
   dominated by near-vertical paths, agrees to 0.4%.
 - **energy closure**: `energy_balance` alone leaves the beam first-scatter
@@ -1343,31 +1727,128 @@ Interpreting the result dict and the diagnostics:
   top face), `plot/manual_example_3d.png` (pyvista $\kappa_e$ isosurfaces +
   $J$ volume). All axes and colourbars carry the units of the convention above.
 
-## 12. Runner scripts
+### Minimal MC example (verified)
+
+The same MC machinery on the phase-2 slab — the smallest end-to-end check of
+§9: stage-1 `j_mc` in both variants against the 64-level Gauss–Legendre
+discrete-ordinates reference from `rt3d.cases.slab_1d`. This script was
+**executed with the pyarts interpreter**; the printed numbers are its actual
+output (seeded, NumPy path — MC wall times scale with history count, not
+cell count).
+
+```python
+# mc_slab_example.py — run from the repo root
+import time
+
+import numpy as np
+
+from rt3d.cases.slab_1d import d1o_J, slab_grid
+from rt3d.mc.forward import j_mc
+from rt3d.transport import boundary_conditions
+
+grid, box, hz = slab_grid(tau=5.0, kappa_e=1.0, nz=50)
+bc = boundary_conditions(top_I=1.0)
+kappa_e = np.full(grid.n_cells, 1.0)
+kappa_s = 0.9 * kappa_e
+B = np.zeros(grid.n_cells)
+
+
+def col(v):                     # vertical profile out of a flat cell field
+    return np.asarray(v).reshape(grid.nz, grid.nx, grid.ny)[:, 1, 1]
+
+
+J_ref = d1o_J(1.0, 0.9, hz, 50)          # 64 GL levels, angle-exact reference
+
+common = dict(g=0.0, periodic_box=box, n_histories=20_000,
+              n_boundary_histories=20_000, n_batches=200)
+t0 = time.perf_counter()
+r_lam = j_mc(grid, kappa_e, kappa_s, B, bc, stage1="lambda",
+             n_iter=120, tol=1e-8, seed=7, **common)
+t_lam = time.perf_counter() - t0
+t0 = time.perf_counter()
+r_exp = j_mc(grid, kappa_e, kappa_s, B, bc, stage1="explicit",
+             seed=8, **common)
+t_exp = time.perf_counter() - t0
+
+for tag, r, wall in (("lambda", r_lam, t_lam), ("explicit", r_exp, t_exp)):
+    dev = np.abs(col(r["J"]) - J_ref)
+    band = 2.0 * r["sigma_J"].max() + 0.03 * J_ref.max()
+    print(f"MC stage1={tag}: max|J-J_ref|/max J_ref = "
+          f"{dev.max()/J_ref.max()*100:5.2f}% (band "
+          f"{band/J_ref.max()*100:5.2f}%), mean J {col(r['J']).mean():.4f} "
+          f"vs ref {J_ref.mean():.4f}, wall {wall:.1f} s")
+```
+
+Verified output (macOS/arm64; the band = 2σ + 3% reference cell
+discretization, the acceptance rule of `scripts/mc_forward_slab.py` — the
+band is dominated by the per-cell σ of near-vacuum cells, finding F3):
+
+```text
+MC stage1=lambda: max|J-J_ref|/max J_ref =  4.12% (band  8.98%), mean J 0.2403 vs ref 0.2350, wall 16.8 s
+MC stage1=explicit: max|J-J_ref|/max J_ref =  2.89% (band  6.53%), mean J 0.2323 vs ref 0.2350, wall 1.4 s
+```
+
+Both variants sit inside the band; the λ variant needs one fresh photon set
+*per iteration* (hence the 10× wall time and the F5 noise floor in
+`history`), while the explicit variant finishes the whole field in one shot
+with ≈ 40 scattering generations (`n_generations`). For the
+production chain A1 → A2 → B (stage-2 radiance and adjoint all-sky
+differenced against SC) run `scripts/mc_compare.py`.
+
+## 13. Runner scripts
 
 All scripts in `scripts/` use `# %%` cell markers (VS Code / Spyder workflow),
 insert the repo root on `sys.path`, use `matplotlib.use("Agg")`, and write
 figures to `plot/`. Run any of them as
 
-```powershell
-$env:Path = "C:\Users\fredd\miniforge3\envs\pyarts\Library\bin;" + $env:Path
-& C:\Users\fredd\miniforge3\envs\pyarts\python.exe scripts/phase0_check.py
+```sh
+# macOS / Linux
+~/miniforge3/envs/pyarts/bin/python scripts/phase0_check.py
 ```
+
+```powershell
+# Windows (PATH fix first!)
+& "$env:USERPROFILE\miniforge3\envs\pyarts\python.exe" scripts/phase0_check.py
+```
+
+**SC phase scripts** (phases 0–6):
 
 | script | what it validates |
 |---|---|
 | `phase0_check.py` | direction grid rebuilds for $n_{\mathrm{refine}}$ 0–3 (12/42/162/642), $\sum w = 4\pi$, $\oint\Phi\,d\Omega = 1$, no $\Omega_z = 0$ ordinate, ray-box exit + DDA march consistency (invariants 1–2). |
 | `phase1_beer.py` | uniform-grid short characteristics: beam $I = F_0 e^{-\tau_b}$, diffuse transmittance vs Beer–Lambert for every ordinate/cell (invariant 3), isothermal $I = B$ exactness. |
-| `phase2_slab.py` | scattering + plain λ-iteration on a 1D slab ($\tau = 5$, $\omega = 0.5/0.9$) vs an independent 64-level Gauss–Legendre discrete-ordinates solver and the two-stream approximation. The slab case lives here (no `slab_1d` module). |
+| `phase2_slab.py` | scattering + plain λ-iteration on a 1D slab ($\tau = 5$, $\omega = 0.5/0.9$) vs an independent 64-level Gauss–Legendre discrete-ordinates solver and the two-stream approximation. Case + references shared via `rt3d.cases.slab_1d`. |
 | `phase3_octree.py` | octree vs unigrid on the Gaussian cloud (invariant 5): chain-vs-exact-path sanity (`build_chain_octree` reference), octree self-convergence, column $\tau \to 10$, scattering run at $\omega \le 0.7$. |
 | `phase4_ng.py` | 1D Ng acceleration: LI vs Ng iteration counts as $\omega \to 1$ (slab), cloud on unigrid ($\omega \le 0.9$, per-cell $g$) and on the octree. |
 | `phase5_ground.py` | periodic sides + Lambertian ground + all-sky output; analytic ground Beer–Lambert checks; pointwise div F vs heating and global energy balance incl. beam/ground terms (invariant 4). |
 | `phase6_directions.py` | direction-grid convergence 42 → 162 → 642 on the cloud, $g = 0.952$ slab (known 42-ordinate limitation), performance pass (chain build + sweep time vs $N_{\mathrm{dir}}$), npz record with `n_refine`. |
 
+**MC phase scripts** (M0–M6, §9):
+
+| script | what it validates |
+|---|---|
+| `mc_phase0_check.py` | M0 tracker: flight distribution + event fractions, HG samples vs `hg_matrix` moments (invariant-2 companion), MC beam transmittance $= e^{-\tau}$ on both grids and both majorant modes, cell vs global mode agreement. |
+| `mc_forward_slab.py` | M1 stage-1 $J$ on the phase-2 slab: λ variant (fresh / CRN / Ng) and explicit chains vs the 64-GL discrete-ordinates reference, with 2σ bands (shared case `rt3d.cases.slab_1d`). |
+| `mc_forward_cloud.py` | M2 stage-2 radiance $I(\text{cell}, \text{ordinate})$ on the cloud **octree**, where MC and SC share the exact marches — purely statistical differencing. |
+| `mc_backward.py` | M3 adjoint detector MC: all-sky consistency (one detector per upward ordinate at exact node direction) vs SC columns on slab + cloud, and the efficiency argument (point query at fixed cost). |
+| `mc_compare.py` | M5 integration pass: full chain A1 → A2 → B vs SC on one setup, energy closure over the whole MC chain (the head-to-head report). |
+| `mc_phase4_walltimes.py` | M4 wall-time table: SC vs MC per query type, NumPy vs numba, analog vs variance-reduced (MC wins stage-2/backward queries, SC wins stage-1 fields). |
+
+**Comparison / performance / report scripts:**
+
+| script | what it does |
+|---|---|
+| `compare_transport.py` | transport-scheme comparison (unigrid chain vs single-cell sc vs octree, ± delta-M) on the §12 worked example; caches solves in `plot/compare_transport/_solve_cache/` (plan/compare-transport-plan.md). |
+| `solver_matrix.py` | the solver-matrix report runner (plan/solver-test-matrix-plan.md §9): one physical setup, every variant → `matrix.csv`, `ranking.csv`, `convergence.csv`, `mc_stats.csv` + figures under `plot/solver_matrix/`; cached reruns are seconds. |
+| `bench_optimization.py` | reproduces the optimization-plan baseline table (march cost/memory, sweep costs, scattering matmul). |
+| `bench_compare_walltimes.py` | before/after wall-clock of the solver optimizations vs the cached `compare_transport.py` solutions (validation gate: max relative $\Delta J$). |
+| `sc_transport_figures.py` | schematic figures for `docs/sc-transport.md` (§6). |
+| `report_figures.py` | vector PDF figures + LaTeX table fragments for the project report (`report/`). |
+
 `scripts/class_test.py` and `scripts/icosphere_grid.py` are **read-only
 legacy reference** (pre-existing research code); do not modify them.
 
-## 13. Condensed API reference
+## 14. Condensed API reference
 
 Signatures + one-liners for all public functions/classes of `rt3d`
 (docstrings in the modules are authoritative for defaults).
@@ -1419,6 +1900,15 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 | `subsegments_uniform(s, h)` | exact sub-segments of the stencil center-to-center path |
 | `build_chain(grid, omega, periodic_box=None, max_offset=None)` | unigrid predecessor chain (stencil + waves + root marches) |
 | `build_chain_octree(oct, omega, periodic_box=None, cos_min=0.9, max_hops=8)` | octree center-to-center chain — **reference only, not used by the solver** |
+
+### `rt3d.short_characteristics` (unigrid single-cell SC, `transport="sc"`)
+
+| signature | description |
+|---|---|
+| `sc_stencil(omega, h)` | entry axis, sense, face-segment length, 4 bilinear nodes + weights |
+| `build_sc_chain(grid, omega, periodic_box=None)` | per-ordinate SC chain (layer-grouped order, node indices/faces) |
+| `sweep_direction_sc(grid, sc, kappa_e, S, bc, bottom_I=None, wrap_tol=1e-12, max_passes=None)` | one SC ordinate sweep (layer loop, ring passes on periodic entry axes) |
+| `sweep_all_sc(grid, direction_grid, kappa_e, S, bc, periodic_box=None, chains=None, n_jobs=1)` | all-ordinate SC transport |
 
 ### `rt3d.transport`
 
@@ -1473,16 +1963,40 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 
 | signature | description |
 |---|---|
-| `lambda_iteration(grid, dg, kappa_e, kappa_s, B, bc, g=0.0, periodic_box=None, beam=None, n_iter=100, tol=1e-8, ng=None, delta_M=0)` | the solver; returns `I, S, J, F, omega, history, n_iter, converged, delta_M, kappa_e_delta` |
+| `lambda_iteration(grid, dg, kappa_e, kappa_s, B, bc, g=0.0, periodic_box=None, beam=None, n_iter=100, tol=1e-8, ng=None, delta_M=0, transport="chain", jit=None, n_jobs=1)` | the SC solver; returns `I, S, J, F, omega, history, n_iter, converged, delta_M, kappa_e_delta, transport, jit, n_jobs` |
+
+### `rt3d.mc.*` (Monte Carlo family, §9)
+
+| signature | description |
+|---|---|
+| `j_mc(grid, kappa_e, kappa_s, B, bc, g=0.0, periodic_box=None, beam=None, stage1="lambda", n_histories=20000, n_boundary_histories=20000, n_beam_histories=20000, n_ground_histories=None, n_batches=100, seed=0, mode="cell", kappa_max=None, n_iter=200, tol=1e-8, ng=None, crn=False, birth="source", max_collisions=20000, path_cap=None, tally_flux=True, implicit_capture=False, roulette_floor=None, jit=False)` | MC stage 1: `J, sigma_J, F, sigma_F, heating, history, n_iter, converged` + direct-beam parts + diagnostics |
+| `stage2_source(grid, dg, kappa_e, kappa_s, B, J, g=0.0, beam=None, periodic_box=None)` | fixed source $(1-\omega)B + \omega J$ + beam first scatter |
+| `radiance_from_source(grid, dg, kappa_e, S_total, bc, periodic_box=None, estimator="next_flight", n_histories=25, n_batches=10, seed=0, mode="cell", kappa_max=None, jit=False, ground_I=None)` | MC stage 2 radiance `I, sigma_I` on the SC ray set (`"deterministic"` = zero-noise) |
+| `backward_detector_mc(grid, kappa_e, kappa_s, B, bc, detector, g=0.0, beam=None, tau_b=None, periodic_box=None, n_batches=100, seed=0, mode="cell", kappa_max=None, max_collisions=20000, path_cap=None, implicit_capture=False, roulette_floor=None, jit=False)` | adjoint radiance at one detector: `I, sigma_I` + walk statistics |
+| `backward_all_sky(grid, kappa_e, kappa_s, B, bc, dg, point, g=0.0, beam=None, tau_b=None, periodic_box=None, n_seeds=20000, n_batches=100, seed=0, mode="cell", kappa_max=None, cone_scale=0.0, jit=False, implicit_capture=False, roulette_floor=None)` | adjoint all-sky at a point, one detector per upward ordinate |
+| `all_sky_cone_half(dg, i)` | equal-area cap half-angle of ordinate $i$ |
+| `sample_collisions(starts, directions, budgets, grid, kappa_e, kappa_s, ...)` | shared Woodcock flight sampler (both grids, both majorant modes) |
+| `walk_lattice(starts, directions, grid, budgets=None, periodic_box=None)` / `walk_octree(starts, directions, oct, budgets, periodic_box=None)` | pure geometric DDA traversals (segment-identical to the SC marches) |
+| `track_histories(starts, directions, grid, kappa_e, kappa_s, tally, ...)` | analog generation chain (`stage1="explicit"`) |
+| `hg_cos_theta(u, g)` / `hg_directions(...)` / `hg_scatter_directions(...)` | HG inverse-CDF direction sampling |
+| `isotropic_directions(n, rng)` / `face_inflow_directions(n, axis, side, rng)` / `face_points(...)` / `face_area(...)` / `beam_seed(...)` | source population samplers |
+| `sample_births(n, grid, rate, method="categorical", seed=0, volumes=None)` | birth positions from a per-cell source rate (null source events) |
+| `track_tally(n_cells, n_histories, n_batches=100, flux=True)` | track-length tally with history-batch error bars |
+| `cell_volumes(grid)` / `n_cells_of(grid)` / `heating_rate(kappa_a, B, J)` | grid helpers (note the `heating_rate` arg order vs diagnostics) |
+| `ground_radiance(grid, ground, F_down=None, beam_irr=0.0)` / `bottom_columns(grid)` / `sample_ground_face(...)` / `down_irradiance_from_segments(...)` | MC ground machinery (calls `transport.ground_inflow`) |
+| `jit_mc_usable(grid, periodic_box=None)` / `sample_collisions_jit(...)` | MC numba fast path (statistically equivalent, different stream) |
 
 ### `rt3d.diagnostics`
 
 | signature | description |
 |---|---|
 | `heating_rate(kappa_a, J, B)` | $4\pi\kappa_a (B - J)$ per cell |
-| `flux_divergence(grid, F)` | div F by central differences (unigrid) |
-| `energy_balance(grid, I, dg, kappa_a, B)` | global face-flux vs heating closure |
-| `allsky(grid, I, dg, face="top")` | outgoing intensity images per leaving ordinate at top/bottom face |
+| `cell_volumes(grid)` | cell/leaf volumes ($h_x h_y h_z$ / $(2\,\mathrm{half})^3$) |
+| `flux_divergence(grid, F)` | div F by central differences (unigrid and octree) |
+| `face_powers(grid, I, dg)` | outward power through top/bottom faces (both grids) |
+| `angular_variance(I, dg)` | angular anisotropy $\frac{1}{4\pi}\sum_i w_i (I_i-J)^2$ per cell |
+| `energy_balance(grid, I, dg, kappa_a, B)` | global face-flux vs heating closure (any grid, adds `relative`) |
+| `allsky(grid, I, dg, face="top")` | outgoing intensity images per leaving ordinate at top/bottom face (unigrid) |
 
 ### `rt3d.cases`
 
@@ -1490,11 +2004,38 @@ Signatures + one-liners for all public functions/classes of `rt3d`
 |---|---|
 | `gauss(x, y, z, sigma=1.0, mu=(0,0,4))` | normalized 3D Gaussian |
 | `gaussian_cloud(sigma=1.0, mu=(0,0,4), tau_column_max=10.0, omega_cap=None)` | class_test.py cloud as box + callable fields |
+| `slab_1d.slab_grid(tau=5.0, kappa_e=1.0, nz=50, nxy=4)` | cubic-cell periodic slab lattice → `(grid, box, hz)` |
+| `slab_1d.slab_profile(grid, nz)` | vertical profile selector for flat slab fields |
+| `slab_1d.d1o_J(kappa_e, omega, hz, nz, top_I=1.0, ...)` | 64 Gauss–Legendre 1D discrete-ordinates reference $J$ |
+| `slab_1d.two_stream_J(kappa_e, omega, z0, z1, zc, top_I=1.0)` | analytic Eddington two-stream (context only) |
 
-## 14. Verification invariants
+## 15. Verification invariants and the test matrix
 
 The five physics invariants from AGENTS.md, with measured numbers (all
-re-verified for this manual unless marked "phase record"):
+re-verified for this manual unless marked "phase record"). They are enforced
+continuously by the pytest suite in `tests/` — 341 tests: per-module suites
+plus the six-tier **cross-solver matrix** (full spec + findings log F1–F14
+in `plan/solver-test-matrix-plan.md`, shared case `tests/matrix_cases.py`,
+pooled-statistics helpers `tests/matrix_stats.py`):
+
+| tier | module | what it pins |
+|---|---|---|
+| T0 | `test_matrix_invariants.py` | invariants swept over every solver variant, no full solve |
+| T1 | `test_matrix_equivalence.py` | deterministic variant equivalence (chain / sc / octree, ±delta-M, ±Ng) |
+| T2 | `test_matrix_crossfamily.py` | **zero-noise identity**: SC octree sweep ≡ MC `radiance_from_source(estimator="deterministic")` to 1.2e-12 (F2) |
+| T3 | `test_matrix_statistics.py` (mark `mc`) | MC ↔ SC and MC ↔ MC consistency with the pooled noise model (fixes F3) |
+| T4 | `test_matrix_closure.py` | global invariant-4 closures per family, octree-capable (F7) |
+| T5 | `test_matrix_ladder.py` (mark `slow`) | refinement ladders, fine-octree reference ranking, convergence orders |
+
+The MC family also has direct companions of the invariants (per-module
+`tests/test_mc_*.py`): invariant 2 — the HG inverse-CDF reproduces the
+`hg_matrix` quadrature moments to quadrature accuracy; invariant 3 — MC
+beam transmittance $= e^{-\tau}$ on **both grids and both majorant modes**;
+invariant 4 — `j_mc`'s track-tallied $F$/heating close globally in T4.
+Invariant 5 has a sharper statement from the matrix (F11): the unigrid
+`chain` transport carries an $h$-**independent** path error (volume-mean
+$J$ +3.1% above the exact-march value, unchanged from $u12^3$ to $u24^3$)
+— the octree exact-characteristic limit is the converged one.
 
 1. **$\sum_i w_i = 4\pi$ over the direction grid.**
    $\left|\sum_i w_i - 4\pi\right|$ = 3.6e-15 / 1.8e-15 / 7.1e-15 / 1.4e-14
@@ -1515,7 +2056,7 @@ re-verified for this manual unless marked "phase record"):
    stencil error, not a bug; see invariant 5.)
 
 4. **div $F$ equals the heating rate from the intensity field.**
-   Cloud + ground + beam run (phase 5 setup; reproduced in §11): pointwise
+   Cloud + ground + beam run (phase 5 setup; reproduced in §12): pointwise
    div $F$ vs $4\pi\kappa_a(B-J)$ in the interior —
    **rms 1.6%, max 13.9%** of $\max|$heating$|$. Global closure (face fluxes
    + gas absorption − beam first-scatter input): **2.96%** of the incident
@@ -1525,7 +2066,7 @@ re-verified for this manual unless marked "phase record"):
 5. **Octree converges to the uniform-grid result on the Gaussian cloud.**
    With identical piecewise-constant fields, the $J$ difference between
    octree (exact characteristics) and unigrid (lattice stencil) is ≈ **18%**
-   (phase 3 record; §11 band means show 0.7–29% depending on height).
+   (phase 3 record; §12 band means show 0.7–29% depending on height).
    Interpretation: this is the **unigrid grazing-ordinate stencil error** —
    the best-aligned center-to-center characteristic of a 42-ordinate grazing
    ray deviates strongly from the true ray on a $24^3$ lattice — *not* an
@@ -1533,7 +2074,7 @@ re-verified for this manual unless marked "phase record"):
    the column-$\tau \to 10$ check confirm the octree side; the coarse
    uniform reference under-resolves the cloud (column $\tau$ 9.58).
 
-## 15. Known limitations and performance
+## 16. Known limitations and performance
 
 **Angular resolution.** 42 ordinates is the development grid but not a
 converged solution at large $g$: the HG lobe at $g \approx 0.95$ is
@@ -1544,15 +2085,19 @@ ordinates — do not extrapolate monotonically). The row normalization (§4)
 deliberately trades phase-function fidelity for discrete energy conservation.
 
 **Variable surface.** `ground_surface(height=f(x,y))` is a hook only; the
-transport supports a flat ground at the domain bottom and
-`lambda_iteration` raises `NotImplementedError` otherwise (plan phase 6
-hook).
+transport supports a flat ground at the domain bottom, and every solver —
+`lambda_iteration` (SC) and `j_mc` / `radiance_from_source` /
+`backward_detector_mc` (MC, `mc.ground.ground_or_raise`) — raises
+`NotImplementedError` otherwise (plan phase 6 hook).
 
 **Octree chain transport.** `build_chain_octree` / `sweep_all_octree` are
 kept as phase-3 reference only: their center-to-center connection has a
 scale-invariant path error ($\tau \approx 4$ on the cloud) that refinement
 does not remove. The solver always uses exact characteristics
-(`precompute_octree_march`).
+(`precompute_octree_march`). The unigrid `chain` scheme likewise carries an
+$h$-independent path error (F11, §15); compare against the octree or the
+single-cell `sc` scheme, not against `chain`, when transport accuracy
+matters.
 
 **Performance** (this machine, phase 6 record + re-measured):
 
@@ -1561,26 +2106,60 @@ does not remove. The solver always uses exact characteristics
   **linear in $N_{\mathrm{dir}}$**; chain/march precomputation is built once
   and reused.
 - Full Ng cloud run ($24^3$, ground + beam) at **642 ordinates ≈ 84 s**
-  (phase 6 record); the §11 example: unigrid 42 ordinates ≈ 4 s, octree
-  (25 264 leaves) ≈ 100 s — both on the Windows machine; the §11 macOS run is
+  (phase 6 record); the §12 example: unigrid 42 ordinates ≈ 4 s, octree
+  (25 264 leaves) ≈ 100 s — both on the Windows machine; the §12 macOS run is
   ~2.5× faster.
 - The octree DDA march cost grows with the *finest* cell size (the step
   budget scales as $\text{path}/h_{\min}$), so very deep octrees
   (max_depth ≥ 4 with small $h_0$) get disproportionately expensive — the
   documented cloud runs use $h_0 = 1.25$, max_depth = 3.
-- **numba is not needed**: all heavy loops are vectorized NumPy (BFS waves,
-  block cumsums, single BLAS matmul for the scattering integral); the test
-  suite and all phase scripts run in pure NumPy.
+- **numba is installed and on by default for the SC octree** (`jit=None`):
+  the fused march + formal solution turns a 443 s precompute into ≈ 5.5 s
+  at 489k leaves (§5 performance note); the unigrid chain/`sc` sweeps run
+  through bit-identical compiled kernels, and `jit=False` forces the pure
+  NumPy references (parity locked by `tests/test_jit.py`). The MC fast path
+  is **opt-in** (`jit=True`, §9). Before/after tables:
+  `scripts/bench_compare_walltimes.py`, `scripts/mc_phase4_walltimes.py`.
+
+**MC-specific caveats** (details in the findings log,
+`plan/solver-test-matrix-plan.md`):
+
+- Every MC result is statistical — always carry the 1-$\sigma$ batch error
+  bars. Per-cell z-scores are heavy-tailed (F3): use the pooled / masked
+  statistics (`tests/matrix_stats.py`), never a per-cell maximum.
+- The λ variant's `converged` flag is **not meaningful** (F5): with fresh
+  sampling per iteration the residual floors at the tally noise. Validate
+  its $J$ field instead; `crn=True, birth="uniform"` can stabilize the
+  residual but freezes a noisy operator on inhomogeneous fields.
+- Every SC-vs-MC per-ordinate comparison *with the beam* on the 42-ordinate
+  development grid is **F14-limited, not noise-limited** (SC's
+  quadrature-normalized vs MC's analytic HG first-scatter source: defect
+  $s(g) = 4.0$–8.9 at $g = 0.9$–0.925); the families only come together as
+  $n_{\mathrm{refine}}$ grows (T5).
+- Adjoint cone averages are comparable to quadrature node values only with
+  `cone_scale` small (default 0); full equal-area caps cross the horizon
+  (§9).
+- MC neither uses nor needs delta-M — its transport is angle-exact — which
+  means MC and SC carry *different angular errors* at fixed
+  $n_{\mathrm{refine}}$; expect the two families to converge toward each
+  other with the direction ladder, not at the development grid.
+- The history budgets (`n_histories`, `n_boundary_histories`,
+  `n_beam_histories`, `n_ground_histories`) are separate populations; cost
+  is linear in their sum, per iteration for the λ variant.
 
 **Other caveats.**
 
-- `flux_divergence` and `energy_balance` are unigrid-only diagnostics
-  (central differences on the uniform lattice).
+- `allsky` is unigrid-only; `flux_divergence`, `face_powers` and
+  `energy_balance` work on both grids (octree: per-boundary-leaf face
+  extrapolation, F7).
 - `energy_balance`'s `residual` does not include the beam first-scatter
   input; subtract $\int \kappa_s F_0 e^{-\tau_b}\,dV$ for the diffuse
-  closure (§11).
+  closure (§12).
 - A single-cell unigrid dimension has nominal width 1.0 (slab convention);
   keep $n_x = n_y = 1$ only with periodic sides.
 - The convergence history is the relative change of the *swept* source; with
   Ng active the swept source is the extrapolated one, so `history` measures
   the plain-LI residual of the accelerated iterate.
+- `rt3d.mc.estimators.heating_rate(kappa_a, B, J)` and
+  `rt3d.diagnostics.heating_rate(kappa_a, J, B)` share a name but **swap
+  the last two arguments** (finding F8) — always pass by keyword if unsure.

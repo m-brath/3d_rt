@@ -10,6 +10,7 @@
 \usepackage{graphicx}
 \graphicspath{{figures/}}
 \usepackage{booktabs}
+\usepackage{array}
 \usepackage{amsmath,amssymb}
 \usepackage{microtype}
 \usepackage{caption}
@@ -29,11 +30,14 @@
 \newcommand{\Om}{\Omega}
 \newcommand{\dg}{\mathrm{dg}}
 
-\title{\bfseries A three-dimensional all-sky monochromatic radiative-transfer
-solver\\[0.4em]
+\title{\texorpdfstring{\bfseries A three-dimensional all-sky monochromatic
+radiative-transfer solver\\[0.4em]
 \large Short characteristics on an octree, Monte Carlo cross-validation,
 and a pinned regression gate\\[0.6em]
 \normalsize Project report --- \texttt{rt3d} code base, branch \texttt{main}}
+{A three-dimensional all-sky monochromatic radiative-transfer solver:
+short characteristics on an octree, Monte Carlo cross-validation,
+and a pinned regression gate}}
 \author{\texttt{3d\_rt} radiative-transfer project}
 \date{November 16, 2026}
 
@@ -95,9 +99,10 @@ one-dimensional Ng acceleration, structured like the DOIT solver of ARTS.
 
 The repository contains the solver package (\texttt{rt3d/}, including the
 Monte Carlo family \texttt{rt3d/mc/}), a pytest cross-solver test matrix
-(\texttt{tests/test\_matrix\_*.py} and per-feature modules, 135 tests in
-the tiers T0--T5 and the MC-ground suite M6), and standalone research
-runners (\texttt{scripts/}). Roughly 23\,000 lines of Python cover solver,
+(\texttt{tests/test\_matrix\_*.py}: 135 tests in the tiers T0--T5 plus the
+MC-ground suite M6) and per-feature suites for individual components ---
+341 tests collected in total --- plus standalone research runners
+(\texttt{scripts/}). Roughly 24\,500 lines of Python cover solver,
 tests, and scripts. The environment is a pinned miniforge environment
 (\texttt{pyarts}): Python 3.14.6, NumPy 2.5.2, SciPy 1.18.0,
 matplotlib 3.11.1, Numba 0.66.0 (JIT on Python 3.14), pytest 9.1.1; every
@@ -338,7 +343,7 @@ records the true sub-segment sequence across level boundaries.}
 \label{fig:march}
 \end{figure}
 
-\subsection{$\delta$-M and beam optics}
+\subsection{\texorpdfstring{$\delta$-M}{delta-M} and beam optics}
 
 The strongly forward-peaked HG function is split by $\delta$-M of order
 1 or 2: the delta component is moved into a renormalized extinction
@@ -405,8 +410,10 @@ The iteration loop is plain lambda iteration with the scattering integral
 evaluated on the quadrature (one BLAS matmul per $g$-bucket per
 iteration), accelerated by one-dimensional Ng recursion per vertical
 column. Figure~\ref{fig:ng} shows histories for a conservative case
-(isotropic slab, $\omega_s=0.99$): Ng cuts 231 iterations to 16 at
-identical fixed point ($\Delta J/J=3.8\cdot10^{-7}$, pinned in T1). On
+(isotropic slab, $\omega_s=0.99$): Ng cuts 231 iterations to 16, both
+runs reaching the same fixed point. The fixed-point agreement pinned in
+T1 is a cloud-case measurement: $\Delta J/J=3.8\cdot10^{-7}$ against a
+$10^{-5}$ band. On
 the cloud case itself Ng is \emph{not} a wall-time win (finding F6 ---
 iteration counts are pinned; the gate asserts only that Ng does not
 pathologically slow the solve). Convergence tolerance in the matrix runs
@@ -416,8 +423,9 @@ is $10^{-8}$ on the plain-iteration residual of the swept source.
 \centering
 \includegraphics[width=.48\textwidth]{fig_ng.pdf}
 \caption{Source-change histories, slab $\tau=5$, $\omega_s=0.99$:
-lambda iteration vs 1D Ng acceleration. The converged fields agree to
-$3.8\cdot10^{-7}$ relative in $J$ (pinned band, T1).}
+lambda iteration vs 1D Ng acceleration; both runs converge to the same
+fixed point (T1 pins the cloud-case agreement at
+$\Delta J/J=3.8\cdot10^{-7}$, band $10^{-5}$).}
 \label{fig:ng}
 \end{figure}
 
@@ -537,7 +545,7 @@ against a fine-octree reference rung (REF: $\tau_{\max}=0.5$, depth 5,
 \centering\footnotesize
 \caption{The cross-solver test matrix. Test counts and runtimes as
 measured on the pinned environment.}
-\begin{tabular}{@{}lp{3.0cm}p{7.9cm}r@{}}
+\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{7.9cm}r@{}}
 \toprule
 tier & file & asserts & tests \\
 \midrule
@@ -572,11 +580,15 @@ populations, stage-2 vs SC, equal-seed determinism pairings & 13 \\
 
 Everything the gate asserts numerically is a \emph{measured} threshold: a
 regression outside a band fails the gate naming the band. Representative
-pinned values: $\delta$-M~1/2 vs 0 converged-field gap $\le1.5\cdot10^{-2}$
-($J$) / $6\cdot10^{-2}$ ($I$); Ng vs plain lambda fixed point
-$\Delta J/J=3.8\cdot10^{-7}$; octree march vs SC chain $1.2\cdot10^{-12}$
-(same source), vs the solver's own $I$ $\le5\cdot10^{-9}$; ground stage-2
-identity $8.6\cdot10^{-10}$; unigrid march-vs-chain $\le0.93$ relative ---
+pinned values (measured values and the bands guarding them):
+$\delta$-M~1/2 vs 0 converged-field gap measured
+$\le1.5\cdot10^{-2}$ in $J$ and $6\cdot10^{-2}$ in $I$ (= the unigrid
+bands); Ng vs plain lambda fixed point measured
+$\Delta J/J=3.8\cdot10^{-7}$, band $10^{-5}$; octree march vs SC chain
+fed the same source $1.2\cdot10^{-12}$, and vs the solver's own $I$
+$\le5\cdot10^{-9}$ at tolerance $10^{-8}$; ground stage-2
+identity $8.6\cdot10^{-10}$; unigrid march-vs-chain measured 0.26 in $J$
+and 0.93 in $I$, pinned bands 0.35/1.2 ---
 pinned as an \emph{F11 finding}, not asserted as correctness. The capability
 matrix (Table~\ref{tab:capability}) records which configuration each
 variant supports; after phase M6 the only unsupported configuration is the
@@ -599,23 +611,30 @@ families; the only unsupported configuration anywhere in the matrix.}
 
 \subsection{Transport behavior on the matrix case}
 
-Figure~\ref{fig:beerk} is the invariant-3 statement in two panels: the chain
-and octree schemes reproduce pure-absorber attenuation to floating-point
-precision for all 42 ordinates; the unigrid SC stencil develops an
-$h$-independent, grazing-ordinate-dominated error (finding F11), which is
-also why unigrid variants plateau at $\approx4\%$ rms $J$ away from the
-octree reference at every resolution.
+Figure~\ref{fig:beerk} is the invariant-3 statement in two panels, run on
+a single transverse column: there the chain's cell-to-cell path is also
+the true ray path, so chain and octree march reproduce pure-absorber
+attenuation to floating-point precision for all 42 ordinates, while the
+SC stencil already deviates. On grids with transverse extent the chain's
+path stops being the true ray, and the same grazing-ordinate-dominated,
+$h$-independent error appears in \emph{both} unigrid schemes (finding
+F11), which is also why unigrid variants plateau at $\approx4\%$ rms $J$
+away from the octree reference at every resolution.
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=.95\textwidth]{fig_beer_f11.pdf}
-\caption{Invariant 3 and finding F11. Left: Beer--Lambert attenuation for
+\caption{Invariant 3 and finding F11, on a single transverse column
+(where even the chain path is the true ray). Left: Beer--Lambert attenuation for
 sample chain characteristics ($\ke=0.7$\,m$^{-1}$, top inflow $I=1$)
 against the analytic law. Right: per-ordinate maximum deviation from the
 exact solution vs ray optical depth, all 42 ordinates: chain and octree
 march sit at the floating-point floor; the unigrid SC stencil deviates
 by up to $10^{-1}$, with the worst ordinates the grazing ones (F11 ---
-pinned as a finding; the solver was left unchanged).}
+on transverse grids the chain carries an $h$-independent error of its
+own, $\approx12\%$ rms: Table~\ref{tab:findings},
+Figs.~\ref{fig:jmaps} and~\ref{fig:ranking}; pinned as a finding, the
+solver was left unchanged).}
 \label{fig:beerk}
 \end{figure}
 
@@ -641,7 +660,7 @@ scattering, $\tau=5$, $\omega_s=0.5$ and 0.9.}
 \caption{Domain-mean upward radiance at top of atmosphere vs outgoing
 $\mu$, all-sky cloud case ($\delta$-M 0): 42-ordinate unigrid chain,
 unigrid SC, and octree variants against the 642-ordinate octree
-reference. The unigrid SC bias at large $\mu$ is the F11 stencil error
+reference. The unigrid SC bias at small $\mu$ is the F11 stencil error
 seen at grazing exit angles.}
 \label{fig:toa}
 \end{figure}
@@ -673,7 +692,13 @@ is the relative invariant-4 residual. Errors are vs the REF solve
 and relative $J$ error of two unigrid variants and one octree rung,
 drawn as exact cell/leaf rectangles. The unigrid chain error is dominated
 by the F11 grazing-ray structure; the unigrid SC error is larger and
-directional; the octree error concentrates at the cloud core.}
+directional; the octree error concentrates at the cloud core. The REF
+panel is itself left--right asymmetric by $\approx2\%$ rms ($\approx5\%$
+locally) although the configuration is $y$-symmetric: the rotated
+42-ordinate direction grid is not $y$-mirror symmetric, so this is a
+quadrature-orientation imprint --- angular, not transport, error
+(a mirrored direction set reproduces the mirrored field to 0.1\% rms,
+and 642 ordinates reduce the asymmetry to $\approx0.2\%$ rms).}
 \label{fig:jmaps}
 \end{figure}
 
@@ -716,7 +741,8 @@ which improves with base-cell size $h_0$, not with depth (finding F7).
 The ground-case closure includes reflected and emitted ground power in
 the bottom-face term, with a guard that a dropped ground term fails
 loudly. Unigrid residuals are the F11 error leaking through the faces
-(chain $+4\cdot10^{-2}$) or the stencil error (SC, $-2\cdot10^{-1}$).
+(chain, $+5.8\cdot10^{-2}$ to $+9.2\cdot10^{-2}$ along the ladder) or
+the stencil error (SC, $-3.3\cdot10^{-1}$).
 
 \begin{figure}[htbp]
 \centering
@@ -784,7 +810,7 @@ F14 caveat: per-ordinate gaps are angle-limited, not noise-limited.}
 \input{tables/mcstats_table.tex}
 \end{table}
 
-\subsection{$\delta$-M consistency}
+\subsection{\texorpdfstring{$\delta$-M}{delta-M} consistency}
 
 \begin{figure}[htbp]
 \centering
@@ -822,12 +848,24 @@ $\ke$ fails the identity by $\ge10^{-2}$ (negative control, T2). \\
 F3 & next-flight per-cell $\sigma$ is invalid (zero/undefined) where
 flights never score; every MC-vs-reference $z$ statistic goes through the
 noise mask --- unmasked $z$ is meaningless ($10^{25}$ tails observed). \\
+F4 & (closed by \S8 of the campaign log) invariant 4 was unigrid-only:
+the divergence/closure helpers indexed the unigrid lattice and failed on
+octree grids, where the accuracy ranking lives; an octree-capable
+closure operator now evaluates invariant 4 for every deterministic
+family (T4). \\
 F5 & common random numbers couple populations; CRN must stay off for
 inhomogeneous fields. \\
 F6 & Ng acceleration is not a wall-time win on this cloud; iteration
 counts pinned, ``no pathological slowdown'' asserted. \\
 F7 & octree closure residual = face-extrapolation error; $h_0$, not depth,
 sets closure accuracy. \\
+F8 & (guarded, rename pending) two same-named \texttt{heating\_rate}
+helpers --- \texttt{diagnostics} (\texttt{kappa\_a, J, B}) and
+\texttt{mc.estimators} (\texttt{kappa\_a, B, J}) --- take their arguments
+in reversed order; mixing them up flips the sign of every
+heating/closure number (this caused a sign bug in the first T4 draft).
+The gate now asserts the sign (absorbed power $\le0$ at $B=0$);
+aliasing/renaming is the recorded follow-up. \\
 F9 & batch $\sigma$ is honest \emph{per cell} (A2 masked rms
 $z\approx1.06$ at 100 flights) but the aggregate per-cell $\sigma$
 quadrature underestimates whole-domain error 2--3$\times$; aggregate

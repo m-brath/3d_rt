@@ -218,13 +218,22 @@ def fig_octree():
     ax.set_ylim(0, 10)
     ax.set_aspect("equal")
     cmap = plt.get_cmap("tab10")
-    for n in range(oct3.n_leaf):
-        c, h = oct3.centers[n], oct3.half[n]
-        if abs(c[1]) < h:
-            ax.add_patch(plt.Rectangle((c[0] - h, c[2] - h), 2 * h, 2 * h,
-                                       facecolor=cmap(int(oct3.level[n])),
-                                       edgecolor="0.25", linewidth=0.3,
-                                       alpha=0.75))
+    # leaves crossing the x = 0 plane, drawn in (y, z) to match the field
+    # panels; the base lattice face sits exactly on x = 0, so the straddle
+    # test must include equality (|c_x| <= h) or no leaf is ever selected
+    C, H, L = oct3.centers, oct3.half, oct3.level
+    sel = np.abs(C[:, 0]) <= H + 1e-12
+    order = np.argsort(-H[sel])  # coarse first, fine paint on top
+    C, H, L = C[sel][order], H[sel][order], L[sel][order]
+    faces = np.empty((C.shape[0], 4, 2))
+    faces[:, :, 0] = np.stack([C[:, 1] - H, C[:, 1] + H, C[:, 1] + H,
+                               C[:, 1] - H], axis=1)
+    faces[:, :, 1] = np.stack([C[:, 2] - H, C[:, 2] - H, C[:, 2] + H,
+                               C[:, 2] + H], axis=1)
+    ax.add_collection(PolyCollection(faces,
+                                     facecolors=[cmap(int(l)) for l in L],
+                                     edgecolors="0.25", linewidths=0.3,
+                                     alpha=0.75))
     handles = [plt.Rectangle((0, 0), 1, 1, facecolor=cmap(lev),
                              edgecolor="0.25", lw=0.4)
                for lev in (0, 1, 2, 3)]
@@ -615,7 +624,8 @@ def fig_jmaps():
         return {"J": sc_solve(grid, **kw)["J"]}
 
     vids = ["u24/chain", "u24/sc", "oct-d3"]
-    fig, axes = plt.subplots(1, 4, figsize=(6.9, 1.95))
+    fig, axes = plt.subplots(1, 4, figsize=(6.9, 2.0),
+                             constrained_layout=True)
     m0 = poly_yz(axes[0], ref_grid, refJ, "viridis")
     axes[0].set_title("REF $J$ (50 380 leaves)")
     cb = plt.colorbar(m0, ax=axes[0], fraction=0.046, pad=0.03)
