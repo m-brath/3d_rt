@@ -1,16 +1,16 @@
-# Plan — full cross-solver test matrix (all SC and MC solvers, one gate + one report)
+# Plan — full cross-solver test matrix (all SC and MC solvers, one acceptance check + one report)
 
 Goal: a single, *sophisticated* validation of **every solver variant in this repo** —
 the deterministic short-characteristics family (`rt3d.solver.lambda_iteration` and its
 transport / grid / iteration / δ-M / backend options) and the Monte Carlo family
 (`rt3d.mc`: stage-1 `j_mc`, stage-2 `radiance_from_source`, adjoint `backward_*`) — as a
-pass/fail pytest gate plus a CSV/figure report script.
+pass/fail pytest acceptance check plus a CSV/figure report script.
 
-Decisions taken with the user (2026-11-16): pytest gate **and** report script; both solver
+Decisions taken with the user (2026-11-16): pytest acceptance check **and** report script; both solver
 families cross-checked; runtime is not a constraint (thorough); correctness is invarianted on
 a **fine-octree reference + refinement ladder** (extends the idea of
-`plan/transport-ranking-plan.md`); today's measured imperfection bands are **pinned as
-regression thresholds**; the **MC Lambertian-ground gap is fixed as part of this work**
+`plan/transport-ranking-plan.md`); today's measured imperfections are **recorded as
+reference ranges**; the **MC Lambertian-ground gap is fixed as part of this work**
 (new phase M6 below).
 
 ---
@@ -54,7 +54,7 @@ Capability matrix as measured today (the test must encode it, not rediscover it)
 
 From throwaway probes of every entry point on the MANUAL/compare case (gaussian cloud,
 ω capped 0.9, g peak ≈ 0.95, 42 ordinates, top inflow, 30° beam). These are the numbers
-the regression bands below are pinned to.
+the reference ranges below are recorded against.
 
 **Wall times (42 ordinates, tol 1e-6):**
 
@@ -130,7 +130,7 @@ reproduced.  Measured at tol = 1e-6, δ-M 0 (the regime where Ng is supposed to 
 At δ-M 1 both take 12 sweeps on u24³ -- Ng changes nothing.  Raising the albedo cap to
 0.99/0.999 leaves the picture unchanged (LI 38, Ng 46 sweeps), so this is not the ω cap.
 The fixed point is identical (ΔJ/J = 3.8e-7), which is what the T1 test asserts; the
-iteration-count assertion is downgraded to a *no-pathological-slowdown* band (Ng/LI ∈
+iteration-count assertion is downgraded to a *no-pathological-slowdown* range (Ng/LI ∈
 [0.9, 2.0] on u24³, and Ng < LI on the octree).  The likely cause is that the plane-
 averaged (z) Λ̄ of `rt3d.accelerator.ng1d` is a poor model of this localized 3-D Gaussian
 blob, so the extrapolated source overshoots.  **Not a test-suite defect and not fixed
@@ -170,7 +170,7 @@ Three conclusions that shape the T4 assertions:
    that, and that depth alone does *not* help).
 3. **Absorbing residuals are dominated by the solution's angular/stencil error**
    (they do not shrink u24 → u48, and chain/sc differ by a factor 5), so they are
-   pinned as bands and used as a discriminating diagnostic only.
+   recorded as reference ranges and used as a discriminating diagnostic only.
 
 Local invariant (`div F` vs `4πκ_a(B−J)`, conservative field where the exact answer
 is 0): mean |div F|/(|F_z|/Lz) = 0.052 max 0.42 (u24) vs 0.115 max 1.03 (oct d2).
@@ -203,11 +203,11 @@ Measured on the matrix case, octree d2 (6 952 leaves), A1 explicit variant,
   history contributes to many cells, so the measured spread of `mean z` over
   independent seed pairs is 0.023 while `std/√n` claims 0.010 — a factor 2.2.
   A "mean z within 3 standard errors of 0" test would reject correct code; T3
-  therefore pins `|mean z|` as a band (≤ 0.10) instead;
+  therefore records `|mean z|` as a reference range (≤ 0.10) instead;
 * **the same seed does not decorrelate the numba and NumPy paths.**  Differenced
   at one seed their pooled z rms is **0.44**, versus **0.85** for different
   seeds — the streams overlap partly despite M4/M5.  Path parity must be tested
-  at *different* seeds (T3 pins both numbers);
+  at *different* seeds (T3 records both numbers);
 * the F3 mask is needed by the **adjoint** family as well: at a top-layer leaf,
   2 of 21 upward ordinates have τ_ray = 0 and hence σ = 0, and the unmasked
   max |z| there is **2·10²⁵**; masked over 6 points × 21 ordinates (114 points)
@@ -284,20 +284,20 @@ while the octree family is self-consistent with the exact march by construction.
 
 Consequences for the test matrix:
 * the octree reference is the right yardstick, and the unigrid rungs must be
-  pinned as *bands* (their error is not removable by refinement), not fitted to
+  recorded as *reference ranges* (their error is not removable by refinement), not fitted to
   zero;
 * the "ladder" of the unigrid family measures its **self-consistency** (Cauchy
-  convergence), and a separate assertion pins its distance from the exact march;
+  convergence), and a separate assertion fixes its distance from the exact march;
 * the plan's ranking statement (octree ≥ chain ≥ sc) is now measured to be
   stronger than assumed: on this case the octree's characteristic march is exact,
   so the unigrid transports are the only ones carrying this term.
 
-Root cause (**documented behaviour, not a regression**): neither unigrid short-
+Root cause (**documented behaviour, not a drift**): neither unigrid short-
 characteristics stencil follows the true characteristic — the `chain` sweep's path
 is the cell-to-cell chain and the `sc` sweep's effective direction is set by its
 bilinear weights — so both carry a **bounded, resolution-independent grazing-
 ordinate error** (`docs/sc-transport.md` §12.2 and §12.5 say exactly this, and
-`tests/test_short_characteristics.py::test_transmittance_staircase_error` pins it
+`tests/test_short_characteristics.py::test_transmittance_staircase_error` records it
 for `transport='sc'`).  The decisive zero-physics measurement, pure absorber
 (`kappa_s = 0`, `B = 0`, no beam) with uniform `kappa_e` on u24, 42 ordinates,
 against the analytic `I_in exp(-kappa s)`:
@@ -318,8 +318,8 @@ which is why every 1D-based validation in the suite passes.
 Consequences for AGENTS.md verification invariant 3 (`kappa_s = 0`, `B = 0` →
 transmittance = `exp(-tau)` along *every* ray): it holds for the octree sweep and
 for the march-based estimators to round-off, and on the unigrid only for z-entry
-ordinates.  The matrix must therefore state the invariant **per family** and pin the
-unigrid violation as a band, and any statement that "the unigrid ladder converges
+ordinates.  The matrix must therefore state the invariant **per family** and record the
+unigrid violation as a reference range, and any statement that "the unigrid ladder converges
 to the same solution as the octree" is false at the 4 % level.
 
 Documentation defect found alongside it: `plan/plan-sc-unigrid.md` §3 item 3 said
@@ -327,14 +327,14 @@ the SC staircase deviation "is O(h) and shrinks under refinement", which both
 `docs/sc-transport.md` §12.2 and the measurement above contradict (it does not
 shrink with h).  **Corrected 2026-11-16.**
 
-**Scope decision (user, 2026-11-16):** the unigrid transport error is **pinned
+**Scope decision (user, 2026-11-16):** the unigrid transport error is **logged
 as a finding — the solver is left unchanged**.  No M7 fix phase, no new
 `transport='march'` option in this pass; the matrix tests all treat the
-unigrid numbers as bands with the F11 cause stated.
+unigrid numbers as reference ranges with the F11 cause stated.
 
 **Finding F12 — the MC segment marcher read uninitialised memory for
 axis-parallel directions; MC results with an exactly axis-parallel direction
-were run-to-run nondeterministic (found while pinning the M6 all-sky case).**
+were run-to-run nondeterministic (found while recording the M6 all-sky case).**
 The numpy segment march in `rt3d/mc/tracking.py` computed face-crossing times
 per axis into a buffer `tf = np.empty(act.size)` and filled only the `da > 0`
 and `da < 0` entries; entries with `da == 0` stayed uninitialised heap garbage
@@ -349,7 +349,7 @@ the ground/beam populations are what exposed it.  All pre-fix all-sky probe
 numbers (the apparent "MC +5 % above SC" and "aggregate noise 9x quadrature")
 were artefacts of this bug; the post-fix measurement is in the T3 module
 header: MC power −2.15 % vs SC, seed-split/quadrature ratio 1.8.
-**Regression guard:** `test_mc_ground.py` pairs (explicit vs lambda, jit vs
+**Stability check:** `test_mc_ground.py` pairs (explicit vs lambda, jit vs
 numpy) at equal seeds and requires agreement at 1e-12 — with this bug the
 paired runs differed at the percent level (the ground-seeded and vertical
 beam cases both contain exactly axis-parallel rays).
@@ -373,7 +373,7 @@ against the solver columns.  Fixed by folding exit points through
 `periodic_box.wrap_xy` before the lookup (forward march octree +
 periodic-unigrid branches, adjoint ground-hit point).  Post-fix: march-vs-
 solver identity 5.6e-17 (pure absorber+beam) / 8.6e-10 (full case, tol-
-limited); adjoint mean z back to ~0.  Regression guard:
+limited); adjoint mean z back to ~0.  Stability check:
 `test_matrix_crossfamily.py::test_ground_stage2_march_identity`.  Note the
 forward MC (`track_histories`) is unaffected — its analog ground reflection
 needs no column lookup, and its wrap bookkeeping already went through
@@ -394,7 +394,7 @@ sum_i w_i Phi_analytic` is ~1.000 to g = 0.5, but 1.06-1.11 at g = 0.7 and
 as: adjoint all-sky (analytic HG) vs SC columns **with beam** shows
 coherent per-ordinate deviations of 6-15 % and masked rms z up to ~30 at
 near-vacuum probe points — orders of magnitude above noise, and the same
-mechanism contributes to the -2.15 % MC-vs-SC power offset pinned in T3 §4
+mechanism contributes to the -2.15 % MC-vs-SC power offset recorded in T3 §4
 (the forward MC carries the analytic-HG beam source into a field the SC
 solve normalized).  It is an *angular-discretization* statement of exactly
 the T5 kind: tighter direction grids drive s(g) → 1 and the two families
@@ -433,13 +433,13 @@ Same case, same grid, one solve per variant, then differenced pairwise:
 - δ-M 1 and 2 vs δ-M 0: converged fields agree within the known O(τ_cell) explicit-term
   gap. **Measured in the T1 pass (tol 1e-6, u24³, common bc):** max|ΔJ|/max J =
   8.4e-3 (M1) / 8.5e-3 (M2), max|ΔI|/max I = 4.1e-2 / 3.1e-2; on octree d2 1.3e-2 /
-  2.6e-2. The pinned bands are 1.5e-2 (J) and 6e-2 (I) on u24³, 2.5e-2 / 5e-2 on the
+  2.6e-2. The reference ranges are 1.5e-2 (J) and 6e-2 (I) on u24³, 2.5e-2 / 5e-2 on the
   octree. δ-M *does* cut the iteration count on this cloud: 12 (M1) and 16 (M2) vs 34
   sweeps (M0).
 - Ng vs plain LI: same fixed point within tol (ΔJ/J = 3.8e-7), but see **F6** — Ng is
-  *not* faster on this case, so the test pins "no pathological slowdown" instead of an
+  *not* faster on this case, so the test asserts "no pathological slowdown" instead of an
   iteration ratio.
-- `chain` vs `sc` on identical cells: the field-wide difference stays in the known band
+- `chain` vs `sc` on identical cells: the field-wide difference stays in the known range
   (**measured 0.26 J / 0.93 I** on u24³ with face inflows, 0.31 / 0.94 with the
   Lambertian ground) **and shrinks with the cell size** (ladder, T5). Note that the
   *peak* values agree much better than the field-wide measure: ground-case Jmax 0.6087
@@ -461,7 +461,7 @@ Assert **max |Δ| / max|I| ≤ 1e-8** (probe 1.4e-9; `mc_compare.txt` 9.6e-11).
 Negative control: feeding physical `kappa_e` under δ-M ≥ 1 must *fail* the identity by a
 ≥1e-2 margin (proves the test can fail). Also asserts `radiance_from_source` with
 `bc.ground` raises until M6 lands, and afterwards reproduces the SC ground inflow.
-On the unigrid the same estimator is compared with a **band**, not exactly: the `chain`
+On the unigrid the same estimator is compared with a **reference range**, not exactly: the `chain`
 sweep is a lattice stencil, not a line integral (M2 decision); `transport="sc"` gives a
 tighter comparison than `chain`.
 
@@ -471,20 +471,20 @@ File: `tests/test_matrix_statistics.py`
 Common (ground-free) case until M6, all-sky case afterwards:
 - A1 explicit vs A1 lambda: `J` agrees within combined σ (probe σ/J ≈ 0.36 at
   20k+20k+20k histories → the matrix uses ≥ 2·10⁵ histories per population to get a ~4 %
-  band; `crn` off for inhomogeneous cases per F5).
-- A1 vs SC `J`: agreement band pinned from the refinement ladder, with the *statistical*
+  range; `crn` off for inhomogeneous cases per F5).
+- A1 vs SC `J`: agreement range recorded from the refinement ladder, with the *statistical*
   part removed (compare A1 ± σ against the SC-vs-reference error of T5, so MC noise and SC
   discretization error are budgeted separately, not conflated).
-- A2 `next_flight` vs SC `I`: masked z statistics (§6.2) — pinned band: masked mean z ≈ 0
+- A2 `next_flight` vs SC `I`: masked z statistics (§6.2) — recorded range: masked mean z ≈ 0
   within ±3/√N, masked rms z ∈ [0.7, 1.6], tail fraction |z| > 3 ≤ 1.5 %; the unmasked
-  tail fraction is **reported** and asserted only to stay inside the measured band
+  tail fraction is **reported** and asserted only to stay inside the measured range
   (3.7 % at 20 flights/ordinate) so a *worsening* tail fails loudly.
 - A2 chain (isotropic `ω J` source) vs A2 fed by SC's direction-resolved source: the
-  difference is the documented O(g) source-model term, asserted as a *deterministic* band,
+  difference is the documented O(g) source-model term, asserted as a *deterministic* reference range,
   never folded into noise.
-- B (exact-HG adjoint) vs SC at pixels: pinned from probe — at 20k seeds/ordinate,
+- B (exact-HG adjoint) vs SC at pixels: recorded from probe — at 20k seeds/ordinate,
   rms z = 1.19, all 21 upward ordinates within 3σ, σ/I ≤ 3.3 %; at 200k seeds rms z = 1.03.
-  Band: rms z ≤ 1.6, max |z| ≤ 3.5, and B-vs-SC pixel deviation ≤ the SC angular-
+  Range: rms z ≤ 1.6, max |z| ≤ 3.5, and B-vs-SC pixel deviation ≤ the SC angular-
   quadrature error measured against SC-162/642 (mc_compare: −2.8 % vs SC-642).
 - MC ↔ MC: `mode="cell"` vs `"global"` (null collisions), `jit` vs NumPy, VR on vs off,
   seed reproducibility (same seed bit-identical, different seeds within combined σ), and a
@@ -494,10 +494,10 @@ Common (ground-free) case until M6, all-sky case afterwards:
 File: `tests/test_matrix_closure.py`
 
 For each family on the same case: net face power vs `∫4πκ_a(B−J)dV`, using the new
-octree-capable closure of §8. Acceptance bands pinned from measurement (today: SC unigrid
+octree-capable closure of §8. Reference ranges recorded from measurement (today: SC unigrid
 −7.0 % with 2-point face extrapolation on the slab, −0.6 % on the cloud octree by the
 ad-hoc cell-center estimate in `mc_compare.txt`) — the new octree closure replaces that
-ad-hoc number with a proper face-area closure and the band is re-pinned once measured.
+ad-hoc number with a proper face-area closure and the range is re-recorded once measured.
 Cross-family: SC vs A1 vs A2 absorbed power agree within a few %.
 
 ### T5 — refinement ladder, reference ranking, convergence order
@@ -508,7 +508,7 @@ kept at the end of this subsection).  As built:
 
 - *Yardstick / reference rungs*: octree `(τ_max 0.25, depth 7)` as yardstick (τ
   criterion needs level 6 → depth 7 never binding), `(τ_max 0.125, depth 7)` as
-  sufficiency rung, `(τ_max 0.5, depth 5)` as the gate reference (self-error
+  sufficiency rung, `(τ_max 0.5, depth 5)` as the acceptance-check reference (self-error
   5.5e-3 rms J against the yardstick).
 - *Octree ladder* in **`tau_max`** (8/4/2/1/0.5 at depth 7), fitted slope in
   `tau_max` ∈ [0.3, 1.0] (measured ~0.6); **depth saturation** asserted instead
@@ -519,11 +519,11 @@ kept at the end of this subsection).  As built:
   ∈ [0.6, 1.6] in h, measured 1.0) — never differenced against the octree for
   the fit, because the cross-family gap does not vanish (F11).
 - *Invariant 3 stated per family*: pure absorber vs analytic `exp(-kappa s)` —
-  octree sweep and deterministic march exact to 1e-12, unigrid `chain` pinned
-  in a violation band (rms 0.05–0.25, max 0.10–0.55).
-- *F11 pinned*: unigrid chain-vs-exact-march rms-J band [0.03, 0.05] at
+  octree sweep and deterministic march exact to 1e-12, unigrid `chain` recorded
+  in a violation range (rms 0.05–0.25, max 0.10–0.55).
+- *F11 recorded*: unigrid chain-vs-exact-march rms-J range [0.03, 0.05] at
   u12/24/48 with an explicit **non-shrinking** assertion; u96-vs-reference gap
-  band [0.03, 0.06]; octree reference asserted to sit at the march limit
+  range [0.03, 0.06]; octree reference asserted to sit at the march limit
   (mean J agrees with the u24 exact march to ≤ 0.5 %).
 - Ranking at equal cost: octree ≥ chain ≥ sc (hypothesis of
   `plan/transport-ranking-plan.md`, enforced by assertion; the margin is
@@ -539,7 +539,7 @@ Every rung solved with `n_iter=400, tol=1e-8` and asserts `converged` — an
 early probe's ranking numbers were iteration error, not discretization error.
 
 Original spec, kept for the record: ladder `u24 → u48 (→ u96 slow)`, `octree
-d2 → d3 → d4 → d5 (τ_max 0.5, 50 380 leaves — the gate reference; the
+d2 → d3 → d4 → d5 (τ_max 0.5, 50 380 leaves — the acceptance-check reference; the
 642-ordinate reference stays in the report script)`, error vs reference
 shrinking monotonically along every ladder, fitted slope ∈ [0.6, 1.6], the same
 ranking assertion, and MC order `N^-0.5` measured against the reference.
@@ -556,7 +556,7 @@ across the *full* option matrix, **(b)** the deterministic SC ≡ MC identity te
 parametrized over δ-M/beam/grid, **(c)** a statistical methodology with an explicit
 noise-validity mask, **(d)** the refinement-ladder ranking with convergence-order fits,
 **(e)** the octree energy closure and the MC ground capability. Where an existing test
-already pins an invariant, the matrix tests *reuse* the case fixtures instead of re-deriving
+already asserts an invariant, the matrix tests *reuse* the case fixtures instead of re-deriving
 them, and no existing test file is rewritten.
 
 ## 5. New files
@@ -564,7 +564,7 @@ them, and no existing test file is rewritten.
 ```
 tests/matrix_cases.py      case builders + grid factories (cloud/slab, levels cached by
                            fixture) + the memoized converged-solve helper
-tests/matrix_stats.py      z-stats, noise-validity mask, pooled chi2, slope fits, band asserts
+tests/matrix_stats.py      z-stats, noise-validity mask, pooled chi2, slope fits, range asserts
 tests/test_matrix_invariants.py        T0
 tests/test_matrix_equivalence.py    T1
 tests/test_matrix_crossfamily.py    T2
@@ -599,7 +599,7 @@ markers =
 ### 6.1 Seeding protocol
 Fixed PCG64 base seeds per test (recorded in the report). Same seed → bit-identical
 results asserted; every statistical assertion is made on ≥ 2 independent seeds and
-requires **both** to pass, so a single lucky stream cannot mask a regression.
+requires **both** to pass, so a single lucky stream cannot mask a drift.
 
 ### 6.2 Noise-validity mask for MC-vs-deterministic differencing (fixes F3)
 A cell enters the z-statistics only if its tally noise model is trustworthy:
@@ -607,7 +607,7 @@ A cell enters the z-statistics only if its tally noise model is trustworthy:
 - **analytic minimum collision count**: from the march segments, the expected number of
   real collisions along the ray through the cell, `E[n_c] = Σ_seg (1−exp(−τ_seg))` (or the
   closed-form `τ_c` for the next-flight estimator), must satisfy `E[n_c] ≥ n_min` (`n_min`
-  tuned once, then pinned; ~5–10);
+  tuned once, then frozen; ~5–10);
 - optionally: exclude cells where the *deterministic* line integral is exactly 0.
 The masked and unmasked statistics are **both** reported; the mask is defined by the
 ray/τ data, never by the observed deviation (no cherry-picking).
@@ -623,7 +623,7 @@ ray/τ data, never by the observed deviation (no cherry-picking).
 
 ### 6.4 Convergence-order fits
 Least-squares log-log slope over ladder points (grid h for SC, history count for MC) with
-pinned acceptance intervals (§3 T5). Fits, not point comparisons, are what make the
+recorded acceptance intervals (§3 T5). Fits, not point comparisons, are what make the
 ranking meaningful.
 
 ---
@@ -669,7 +669,7 @@ Verification of M6 (before the matrix re-uses the all-sky case):
   (`test_ground.py:63` analogue), analytic ground emission `I = eps B_g` in vacuum,
   reflected-beam irradiance `A F0 |μ_sun| exp(−τ_b)/π`;
 - MC all-sky at the cloud-top pixel vs SC all-sky (`diagnostics.allsky`) within the same
-  bands as T3;
+  reference ranges as T3;
 - energy closure with ground: the bottom-face power includes the reflected + emitted part;
 - the whole T1–T5 matrix then runs a **second** case family: the full all-sky + ground
   case, so the §1 capability matrix collapses to "everything supported except variable
@@ -688,7 +688,7 @@ J = B_g/2 and F_z = π B_g per the angle-averaged MC convention; Beer-Lambert +
 albedo ground vs continuum analytic at A ∈ {0, 0.3, 0.9} within 2.5σ; adjoint
 cones over the ground; reflected-beam population J = A F0 μ/(2π) with exact
 J_direct = F0/4π and `n_ground_reflections = 0`; stage-2 `ground_I` vs the SC
-solve — z-entry ordinate 7.5e-3, obliques in the F11 band).  The all-sky
+solve — z-entry ordinate 7.5e-3, obliques in the F11 range).  The all-sky
 cross-family comparison moved into T3 §4 (`test_matrix_statistics.py`): with
 conventions matched (MC 'J_total' includes the uncollided beam, SC 'J' does
 not — the F12 fix was prerequisite) MC power is −2.15 % vs SC, per-cell
@@ -731,7 +731,7 @@ Runtime: first run ≈ 40–60 min (the 642-ordinate reference octree run needs 
 docs — keep it opt-in via `--reference-ordinates 3`; the default reference is the
 42-ordinate depth-5 octree, ≈ 1.4 GB). Cached reruns: seconds.
 
-## 10. Runtime budget for the gate (measured, extrapolated)
+## 10. Runtime budget for the acceptance check (measured, extrapolated)
 
 | tier | estimate |
 |---|---|
@@ -749,26 +749,26 @@ docs — keep it opt-in via `--reference-ordinates 3`; the default reference is 
    interrupted).  **Status: done** (helpers, `pytest.ini`, baseline run).
 2. T0, T1 (deterministic only, no MC) — should be green immediately; any red is a real
    finding to investigate before proceeding.  **Status: done** — T0 43 tests / 2 s,
-   T1 20 tests / 30 s; findings F6 (Ng) and the oblique-ordinate bands recorded above.
+   T1 20 tests / 30 s; findings F6 (Ng) and the oblique-ordinate ranges recorded above.
 3. T2 cross-family identity + its negative control — the δ-M feed (F2) must be encoded
    here, not papered over.  **Status: done** — 12 tests / 105 s; identity measured at
    1.2e-12 (octree, same source) and 5e-9 (vs the solver's own I at tol 1e-8), negative
-   control 9.5e-2 / 5.8e-2; the unigrid is a pinned two-sided band (0.93 vs chain,
+   control 9.5e-2 / 5.8e-2; the unigrid is a recorded two-sided range (0.93 vs chain,
    0.90 vs SC).
 4. §8 octree closure, then T4.  **Status: done** — `cell_volumes` / `face_powers` /
    octree `flux_divergence` added (unigrid path bit-unchanged), T4 18 tests / 3:41 green
-   including the `slow` convergence test; finding F7 pinned (closure residual = face
+   including the `slow` convergence test; finding F7 recorded (closure residual = face
    extrapolation + midpoint volume rule; octree closure tracks `h0`, not `max_depth`).
 5. Mask/χ² helpers validated against synthetic Gaussian data + the measured F3 numbers;
    then T3.  **Status: done** — 13 tests / 3:13 green (fixed seeds, two-seed rule, masked
    z for A2 next-flight and for the adjoint all-sky, aggregate error = aggregate sigma to
    0.2 %, MC order 0.500 for a 4x flight increase); finding F9 recorded above.
-6. Ladder + reference, then a **threshold-pinning pass**: fill in every pinned band from a
+6. Ladder + reference, then a **threshold-recording pass**: fill in every reference range from a
    real run and record the numbers in §2 of this plan and in `docs/solver-matrix.md`.
    **Status: done** (`docs/solver-matrix.md` written in step 8) — T5 10 tests / 14:37 green (module
-   docstring + bands carry the measured numbers: yardstick self-error 6.8e-3 rms J at the
+   docstring + reference ranges carry the measured numbers: yardstick self-error 6.8e-3 rms J at the
    τ-saturation floor, REF rung 5.5e-3 / 5.3e-2, τ-ladder slope 0.6 in `tau_max` with
-   max-J and mean-J floors pinned as bands, unigrid Cauchy slope 1.03 with the
+   max-J and mean-J floors recorded as ranges, unigrid Cauchy slope 1.03 with the
    vs-u96 distance only monotone+banded (F11), invariant 3 per family (octree/march 1e-15,
    chain 1.2–1.4e-1), MC order −0.49 by seed splitting, cost ranking oct ≥ chain ≥ sc,
    δ-M shift 4.5e-4 ≪ rung self-error).
@@ -778,12 +778,12 @@ docs — keep it opt-in via `--reference-ordinates 3`; the default reference is 
    smoke tests (T2 now 12 tests, green); T3 §4 all-sky cross-family MC-vs-SC green
    (T3 now 15 tests).  Prerequisite fixes: **F12** (uninitialised `tf` buffer
    made every axis-parallel-direction MC run nondeterministic; one-line fix in
-   `rt3d/mc/tracking.py`, full MC regression green after it: 60 tests) and
+   `rt3d/mc/tracking.py`, full MC stability checks green after it: 60 tests) and
    **F13** (unwrapped periodic exit points in the ground-column lookup broke
    the march-vs-solver ground identity at 1.2e-1; `wrap_xy` fold in
    `rt3d/mc/forward.py`/`backward.py`, guarded by
    `test_ground_stage2_march_identity`).  Step 7 complete: the ground variant
-   of the T4 closure is pinned (`test_closure_ground_case_band`: relative
+   of the T4 closure is recorded (`test_closure_ground_case_band`: relative
    residual -3.5e-3 oct2 / -2.2e-3 oct3 / +8.7e-2 u24, bottom-face power
    guard, oct2 > oct3 improvement per the F7 ordering).
 8. `scripts/solver_matrix.py` + `docs/solver-matrix.md`; refresh AGENTS.md (its "there is
@@ -801,13 +801,13 @@ docs — keep it opt-in via `--reference-ordinates 3`; the default reference is 
 
 ## 12. Risks and open items
 
-- **Statistical flakiness**: mitigated by fixed seeds, the two-seed requirement, and pinned
-  bands instead of bare 2σ rules; F3 means some quantities can only be validated with
+- **Statistical flakiness**: mitigated by fixed seeds, the two-seed requirement, and recorded
+  reference ranges instead of bare 2σ rules; F3 means some quantities can only be validated with
   masked statistics — the test states that out loud rather than hiding it.
 - **Reference sufficiency**: the depth-5 octree saturates (`tau_max = 0.5` adds no leaves,
   per `transport-ranking-plan.md`), so it is a *discretization-limit* reference, not the
   continuum limit; the 642-ordinate variant stays opt-in in the report script.
-- **Memory**: octree march tables scale as ~34 MB/ordinate on 50 k leaves; the gate keeps
+- **Memory**: octree march tables scale as ~34 MB/ordinate on 50 k leaves; the acceptance check keeps
   42 ordinates, the 642-ordinate reference is opt-in.
 - **δ-M on the octree**: refinement runs on physical `κ_e` outside the solver — intended
   design — so δ-M and grid-refinement errors do not cancel; the ladder reports δ-M on and
@@ -822,8 +822,8 @@ docs — keep it opt-in via `--reference-ordinates 3`; the default reference is 
   `mc_j_total()` in the report applies it; the T3 §4 fixture runs only the explicit
   variant (where `J_total` already carries the tallied column), so no correction is
   needed there.  The rule is item 6 of `docs/solver-matrix.md` §6.
-- `energy_balance` on the octree is only as good as its face extrapolation: pin its
-  residual as a band, and fit its *improvement* under refinement rather than its absolute
+- `energy_balance` on the octree is only as good as its face extrapolation: record its
+  residual as a reference range, and fit its *improvement* under refinement rather than its absolute
   value.
 
 ## 13. Definition of done
@@ -833,4 +833,4 @@ docs — keep it opt-in via `--reference-ordinates 3`; the default reference is 
   for each; the capability matrix contains no gap except variable ground.
 - The SC ≡ MC deterministic identity holds at ≤ 1e-8 for every parametrization, and its
   negative control still fails as expected.
-- Every pinned band is traceable to a measured run recorded in `docs/solver-matrix.md`.
+- Every recorded reference range is traceable to a measured run recorded in `docs/solver-matrix.md`.

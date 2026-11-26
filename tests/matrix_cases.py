@@ -221,7 +221,7 @@ def solve_cloud(grid, bc="common", top_I=1.0, bottom_I=0.5, albedo=0.0,
 # =============================================================================
 
 # deterministic solver variants that must all reproduce the same converged
-# field (within their documented discretization bands)
+# field (within their documented discretization ranges)
 SC_VARIANTS = {
     # key: kwargs for lambda_iteration
     "chain-jit": {"transport": "chain", "jit": None},

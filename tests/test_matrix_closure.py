@@ -31,8 +31,8 @@ Closure statement for a converged field:
 * for an **absorbing** cloud the residual (~4 % on u24^3, ~1 % on the
   octree, and strongly transport-dependent: chain +4.2 %, sc -22 %) is
   dominated by the 42-ordinate angular/quadrature error of the solution and
-  does not shrink u24 -> u48.  It is therefore pinned as a band and used as
-  a *discriminating diagnostic*, never as an accuracy gate.
+  does not shrink u24 -> u48.  It is therefore recorded as a reference range and used as
+  a *discriminating diagnostic*, never as an accuracy criterion.
 
 Cross-family, the same closure is applied to Monte Carlo tallies as far as
 their estimators allow: A2 (`radiance_from_source`) has per-ordinate ``I``
@@ -75,7 +75,7 @@ from rt3d.transport import sweep_all_octree_exact
 # helpers / fixtures
 # =============================================================================
 
-# pinned closure residuals (relative, signed): label -> (measured, lo, hi)
+# recorded closure residuals (relative, signed): label -> (measured, lo, hi)
 CLOSURE_PINS = {
     "conservative-u24": (3.255e-05, 1e-5, 1e-4),
     "conservative-u48": (6.551e-07, 1e-8, 1e-5),
@@ -289,13 +289,13 @@ def _analytic_layer(z, kappa, dg, top_I=1.0, bottom_I=0.5):
 
 def test_face_extrapolation_error_law():
     """
-    Plan section 8 asks the closure to "state its own error"; this pins that
+    Plan section 8 asks the closure to "state its own error"; this records that
     error on a field whose physics is known exactly.
 
     Measured relative closure residual of `energy_balance` on the analytic
     absorber: +10.2 % (12^3), +3.97 % (24^3), +1.32 % (48^3), +0.39 % (96^3)
     -> fitted slope ~1.4 in h: monotone, but *not* second order.  Two
-    channels add up to it, and both are pinned separately:
+    channels add up to it, and both are recorded separately:
 
     * the face extrapolation (face value vs first interior cell differ by
       O(kappa h / |mu|), and the 42-ordinate set has |mu| ~ 0.1), and
@@ -363,17 +363,17 @@ def test_closure_identity_with_analytic_integrals():
 
 
 # =============================================================================
-# 4. absorbing case: pinned bands (discriminating, not a gate)
+# 4. absorbing case: recorded reference ranges (discriminating, not an acceptance check)
 # =============================================================================
 
 @pytest.mark.parametrize("variant", ["chain", "sc"])
 def test_closure_absorbing_unigrid_band(u24, variant):
     """
-    Absorbing matrix case (omega capped at 0.9), no beam, on u24^3, pinned
+    Absorbing matrix case (omega capped at 0.9), no beam, on u24^3, recorded
     per transport: chain +4.23 %, sc -22.3 %.  The size is the
     42-ordinate/transport error of the *solution* (it does not shrink
     u24 -> u48), so it is a diagnostic that separates the two transports,
-    not a physics gate.
+    not a physics acceptance check.
     """
     kappa_e, kappa_s, _g, B = cloud_fields(u24)
     res = solve_cloud(u24, ng=True, delta_M=1, beam=False, n_iter=120,
@@ -393,7 +393,7 @@ def test_closure_absorbing_octree_band(grid_factory, label):
     """
     Same case on the octree: -1.04 % (d2) and -1.28 % (d3) vs +4.2 % on
     u24^3 -- the refined leaves resolve the absorbing core, so the residual
-    drops by 4x.  Still pinned rather than asserted to vanish.
+    drops by 4x.  Still bounded by a recorded range rather than asserted to vanish.
     """
     grid = grid_factory()
     kappa_e, kappa_s, _g, B = cloud_fields(grid)
@@ -419,7 +419,7 @@ def test_closure_absorbing_octree_band(grid_factory, label):
 # Measured (ng, delta-M 1, beam, albedo 0.3, eps B_g = 1, converged 400 it):
 #   oct2 -3.5e-3, oct3 -2.2e-3  (vs -1.0..-1.3e-2 on the no-ground absorbing
 #   case: the ground emission dominates the bottom face and the *relative*
-#   residual improves);  u24^3 +8.7e-2 (F11/F7 unigrid plateau, pinned wide).
+#   residual improves);  u24^3 +8.7e-2 (F11/F7 unigrid plateau, recorded wide).
 
 @pytest.mark.parametrize("grid_factory,label,pin", [
     (lambda: cloud_octree(2.0, 2), "ground-oct2", (-6e-3, -1e-4)),
@@ -485,7 +485,7 @@ def test_cross_family_absorbed_power(oct2):
     A1's statistical error is 0.18 %, so the 2 %
     SC-42 gap is the **angular quadrature error** of 42 ordinates: with 162
     ordinates SC lands within 0.7 % of A1.  Asserted: both seeds inside the
-    band, the gap shrinks with more ordinates, and the majorant mode does
+    range, the gap shrinks with more ordinates, and the majorant mode does
     not move the answer beyond statistics.
     """
     kappa_e, kappa_s, g, B = cloud_fields(oct2)
@@ -577,8 +577,8 @@ def test_flux_divergence_octree_local(u24, oct2):
     Measured mean |div F| / (|F_z|/Lz): 0.052 (u24, max 0.42) vs 0.115
     (octree d2, max 1.03) -- the new octree stencil (face-probe differences
     between neighbour leaf centers) is the same order as the unigrid
-    central-difference stencil, a factor ~2 worse at h0 = 1.25 m.  Pinned as
-    a band; the global closures above are the sharp version of this invariant.
+    central-difference stencil, a factor ~2 worse at h0 = 1.25 m.  Recorded as
+    a reference range; the global closures above are the sharp version of this invariant.
     """
     dg = direction_grid(1)
     res_u = _conservative_solve(u24)

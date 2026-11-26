@@ -33,11 +33,11 @@
 \title{\texorpdfstring{\bfseries A three-dimensional all-sky monochromatic
 radiative-transfer solver\\[0.4em]
 \large Short characteristics on an octree, Monte Carlo cross-validation,
-and a pinned regression gate\\[0.6em]
+and an acceptance check with measured reference ranges\\[0.6em]
 \normalsize Project report --- \texttt{rt3d} code base, branch \texttt{main}}
 {A three-dimensional all-sky monochromatic radiative-transfer solver:
 short characteristics on an octree, Monte Carlo cross-validation,
-and a pinned regression gate}}
+and an acceptance check with measured reference ranges}}
 \author{\texttt{3d\_rt} radiative-transfer project}
 \date{November 16, 2026}
 
@@ -60,12 +60,12 @@ lambda-iteration/Ng-accelerated iteration loop; and a Monte Carlo (MC)
 family with Woodcock null-collision tracking, a two-stage forward solver,
 and a backward (adjoint) solver. All results rest on five verification invariants
 and a six-tier cross-solver test matrix in which every accepted
-imperfection is pinned as a measured regression band. Fourteen findings
+imperfection is recorded as a measured reference range. Fourteen findings
 (F1--F14) document what the numbers mean: two real bugs fixed during the
 campaign (F12, F13), several structural error floors (F11 unigrid
 grazing-ray error, F14 direction-quadrature beam mismatch), and rules
 for reading MC statistics honestly (F3, F9). All figures in this report
-are generated from the same solves the pytest gate pins.
+are generated from the same solves the pytest acceptance check records.
 \end{abstract}
 
 \tableofcontents
@@ -79,7 +79,7 @@ three-dimensional, inhomogeneous, scattering--absorbing medium under
 all-sky illumination. The design goals, in priority order, were:
 (i)~\emph{correctness under scrutiny} --- every transport path is validated
 against analytic limits and against an independent solver family, and every
-residual defect is pinned as a measured regression band rather than
+residual defect is recorded as a measured reference range rather than
 silently tolerated;
 (ii)~\emph{geometric adaptivity} --- an octree driven by local optical
 depth so that resolution is spent where the cloud is;
@@ -111,13 +111,13 @@ bit-identically (tier T1).
 
 \emph{How to read this report.} Sections~\ref{sec:formulation}--\ref{sec:iteration}
 describe the physics and the two solver families; section~\ref{sec:validation}
-describes the validation architecture (invariants, tiers, pinned bands);
+describes the validation architecture (invariants, tiers, reference ranges);
 section~\ref{sec:results} presents the measured results and the findings
 F1--F14 that govern their interpretation; section~\ref{sec:performance}
 covers performance; section~\ref{sec:conclusions} states limitations.
 Every figure is regenerable end-to-end with the commands in
 appendix~\ref{sec:reproduce}; the scalar numbers quoted in the text are the
-same ones the pytest gate pins.
+same ones the pytest acceptance check records.
 
 %=============================================================================
 \section{Physical formulation}
@@ -349,7 +349,7 @@ The strongly forward-peaked HG function is split by $\delta$-M of order
 1 or 2: the delta component is moved into a renormalized extinction
 $\ke^{\delta}$ and modified source, and the residual phase function is
 rendered on the quadrature. The converged field must not depend on the
-$\delta$-M order beyond the pinned band (measured: $\le1.5\cdot10^{-2}$
+$\delta$-M order beyond the recorded reference range (measured: $\le1.5\cdot10^{-2}$
 in $J$, $\le6\cdot10^{-2}$ in $I$ relative, tier T1;
 Fig.~\ref{fig:deltaM}). Beam optical depths $\tau_b$ are computed by a
 dedicated sweep along $\Om_\odot$ on both grid types and are exact to
@@ -411,11 +411,11 @@ evaluated on the quadrature (one BLAS matmul per $g$-bucket per
 iteration), accelerated by one-dimensional Ng recursion per vertical
 column. Figure~\ref{fig:ng} shows histories for a conservative case
 (isotropic slab, $\omega_s=0.99$): Ng cuts 231 iterations to 16, both
-runs reaching the same fixed point. The fixed-point agreement pinned in
+runs reaching the same fixed point. The fixed-point agreement recorded in
 T1 is a cloud-case measurement: $\Delta J/J=3.8\cdot10^{-7}$ against a
-$10^{-5}$ band. On
+$10^{-5}$ range. On
 the cloud case itself Ng is \emph{not} a wall-time win (finding F6 ---
-iteration counts are pinned; the gate asserts only that Ng does not
+iteration counts are recorded; the acceptance check asserts only that Ng does not
 pathologically slow the solve). Convergence tolerance in the matrix runs
 is $10^{-8}$ on the plain-iteration residual of the swept source.
 
@@ -424,8 +424,8 @@ is $10^{-8}$ on the plain-iteration residual of the swept source.
 \includegraphics[width=.48\textwidth]{fig_ng.pdf}
 \caption{Source-change histories, slab $\tau=5$, $\omega_s=0.99$:
 lambda iteration vs 1D Ng acceleration; both runs converge to the same
-fixed point (T1 pins the cloud-case agreement at
-$\Delta J/J=3.8\cdot10^{-7}$, band $10^{-5}$).}
+fixed point (T1 records the cloud-case agreement at
+$\Delta J/J=3.8\cdot10^{-7}$, range $10^{-5}$).}
 \label{fig:ng}
 \end{figure}
 
@@ -449,7 +449,7 @@ exact cross-family identities), next-flight radiance estimators, and
 analog flights. HG directions are sampled from the analytic CDF with
 exact normalization --- in contrast to the SC quadrature normalization of
 the beam first-scatter term, which is the origin of finding F14. Segment
-marching shares the octree walker; one MC bug found by the gate (F12:
+marching shares the octree walker; one MC bug found by the acceptance check (F12:
 uninitialized face-crossing times for axis-parallel directions) is
 documented in section~\ref{sec:findings}.
 
@@ -500,8 +500,8 @@ quadrature of the per-cell $\sigma$.
 \includegraphics[width=.85\textwidth]{fig_mc_slab.pdf}
 \caption{MC stage-1 $J$ on the 1D slab ($\tau=5$, $g=0$) against the
 1D discrete-ordinates reference (64 Gauss--Legendre $\mu$) and the
-two-stream closure, together with the SC solver (42 ordinates). MC bands
-are $2\sigma$ history-batch bands; MC transport is angle-exact, so the
+two-stream closure, together with the SC solver (42 ordinates). MC reference ranges
+are $2\sigma$ history-batch ranges; MC transport is angle-exact, so the
 visible deviation from the 1D reference is the reference's own cell
 discretization plus statistical noise.}
 \label{fig:mcslab}
@@ -514,7 +514,7 @@ discretization plus statistical noise.}
 
 \subsection{Verification invariants}
 
-Five invariants gate every change to transport, source, or iteration code:
+Five invariants guard every change to transport, source, or iteration code:
 (1)~$\sum_i w_i=4\pi$ for the direction grid;
 (2)~$\int\Phi\,d\Om=1$ for HG (including MC samplers);
 (3)~$\ks=0$, $B=0$ $\Rightarrow$ transmittance $=e^{-\tau}$ along
@@ -527,14 +527,14 @@ Gaussian cloud.
 
 (These five checks were originally called \emph{anchors} throughout the
 project; on 2026-11-16 the term was renamed to \emph{verification
-invariants} everywhere --- code, gate (\texttt{test\_matrix\_invariants.py}),
+invariants} everywhere --- code, acceptance check (\texttt{test\_matrix\_invariants.py}),
 docs, plans, and this report. Only pre-rename compiled artifacts
 (\texttt{docs/*.pdf}, older PNG figures under \texttt{plot/}) still show
 the old term.)
 
 \subsection{Tiers T0--T5 and M6}
 
-The pytest gate (tiers T0--T5) and the report runner
+The pytest acceptance check (tiers T0--T5) and the report runner
 (\texttt{solver\_matrix.py}) share case and statistics helpers, so
 they cannot drift apart. Every solver variant of both families runs on one
 physical setup (section~\ref{sec:formulation}); correctness is established
@@ -554,12 +554,12 @@ normalization incl.\ MC samplers, Beer--Lambert on identical rays for
 chain/SC/octree/JIT/NumPy/MC cell+global/adjoint/beam-$\tau$) & 43 \\
 T1 & \texttt{matrix\_equivalence} & deterministic equivalence: JIT vs NumPy
 and threading bit-identical; $\delta$-M orders vs order 0; Ng fixed point;
-chain vs SC band; ground/beam/periodic structure; guards & 20 \\
+chain vs SC range; ground/beam/periodic structure; guards & 20 \\
 T2 & \texttt{matrix\_crossfamily} & zero-noise identity: MC deterministic
 line integral fed the SC source $\equiv$ SC octree sweep (max $1.2\cdot
 10^{-12}$); negative control (physical $\ke$ under $\delta$-M fails by
-$\ge10^{-2}$); ground stage-2 identity (F13 guard); unigrid pinned as
-band (F11) & 13 \\
+$\ge10^{-2}$); ground stage-2 identity (F13 guard); unigrid recorded as
+reference range (F11) & 13 \\
 T3 & \texttt{matrix\_statistics} & statistical consistency under the noise
 model: A1 explicit vs $\lambda$, A1 vs SC, seed-pair pooled $z$,
 next-flight F3 masking, adjoint masked $z$, all-sky ground MC vs SC & 15 \\
@@ -576,20 +576,20 @@ populations, stage-2 vs SC, equal-seed determinism pairings & 13 \\
 \end{tabular}
 \end{table}
 
-\subsection{Pinned bands: measured imperfections, not tolerated ones}
+\subsection{Recorded reference ranges: measured imperfections, not tolerated ones}
 
-Everything the gate asserts numerically is a \emph{measured} threshold: a
-regression outside a band fails the gate naming the band. Representative
-pinned values (measured values and the bands guarding them):
+Everything the acceptance check asserts numerically is a \emph{measured} threshold: a
+drift outside a reference range fails the acceptance check naming the range. Representative
+recorded values (measured values and the reference ranges guarding them):
 $\delta$-M~1/2 vs 0 converged-field gap measured
 $\le1.5\cdot10^{-2}$ in $J$ and $6\cdot10^{-2}$ in $I$ (= the unigrid
-bands); Ng vs plain lambda fixed point measured
-$\Delta J/J=3.8\cdot10^{-7}$, band $10^{-5}$; octree march vs SC chain
+ranges); Ng vs plain lambda fixed point measured
+$\Delta J/J=3.8\cdot10^{-7}$, range $10^{-5}$; octree march vs SC chain
 fed the same source $1.2\cdot10^{-12}$, and vs the solver's own $I$
 $\le5\cdot10^{-9}$ at tolerance $10^{-8}$; ground stage-2
 identity $8.6\cdot10^{-10}$; unigrid march-vs-chain measured 0.26 in $J$
-and 0.93 in $I$, pinned bands 0.35/1.2 ---
-pinned as an \emph{F11 finding}, not asserted as correctness. The capability
+and 0.93 in $I$, recorded ranges 0.35/1.2 ---
+logged as an \emph{F11 finding}, not asserted as correctness. The capability
 matrix (Table~\ref{tab:capability}) records which configuration each
 variant supports; after phase M6 the only unsupported configuration is the
 variable-height ground.
@@ -633,7 +633,7 @@ march sit at the floating-point floor; the unigrid SC stencil deviates
 by up to $10^{-1}$, with the worst ordinates the grazing ones (F11 ---
 on transverse grids the chain carries an $h$-independent error of its
 own, $\approx12\%$ rms: Table~\ref{tab:findings},
-Figs.~\ref{fig:jmaps} and~\ref{fig:ranking}; pinned as a finding, the
+Figs.~\ref{fig:jmaps} and~\ref{fig:ranking}; logged as a finding, the
 solver was left unchanged).}
 \label{fig:beerk}
 \end{figure}
@@ -718,7 +718,7 @@ unigrid Cauchy ladder is internally textbook first order (fitted slope
 1.01), the octree $\tau$-ladder converges in $\tau_{\max}$ with slope
 $\approx0.6$ toward the saturation floor, and the MC power error follows
 the $N^{-1/2}$ law (seed-split estimate; slope $-0.37$ over three
-ladder rungs at modest sample counts --- the gate's dedicated T5 test
+ladder rungs at modest sample counts --- the acceptance check's dedicated T5 test
 measures $N^{-0.49}$).
 
 \begin{figure}[htbp]
@@ -769,12 +769,12 @@ comparison is a bug --- that rule is exactly how F13 was found.
 \emph{Statistical comparisons (T3).} On the full all-sky case, MC stage-1
 absorbed power sits $-2.35\%$ (A1 explicit, local majorant), $-2.41\%$
 (A1 lambda), and $-1.81\%$ (global majorant) from SC on the same grid
-(Fig.~\ref{fig:mcpower}); the pinned all-sky band is
+(Fig.~\ref{fig:mcpower}); the recorded all-sky range is
 $[-5\%,0\%]$ with a coherent quarter-$\sigma$ cell-level offset
 contributed partly by F14. The per-cell $z$ statistics are only
 meaningful under the F3 mask (Fig.~\ref{fig:zhist},
 Table~\ref{tab:mcstats}): unmasked, the next-flight $z$ blows up
-(rms 13.9 here; the pinned gate reports up to $10^{25}$ tails) because
+(rms 13.9 here; the acceptance-check report shows up to $10^{25}$ tails) because
 per-cell $\sigma$ is zero or undefined where flights never score.
 
 \begin{figure}[htbp]
@@ -782,7 +782,7 @@ per-cell $\sigma$ is zero or undefined where flights never score.
 \includegraphics[width=.5\textwidth]{fig_mcpower.pdf}
 \caption{MC stage-1 absorbed power vs SC on the same octree grid
 (oct-d2), with per-cell batch $\sigma$. All variants sit a few percent
-below SC; the dotted line marks the pinned T3 \S4 all-sky band centered
+below SC; the dotted line marks the recorded T3 \S4 all-sky range centered
 on the measured $-2.15\%$ offset (convention-matched basis: SC $J$ plus
 analytic beam column).
 Aggregate error bars from per-cell $\sigma$ quadrature are optimistic
@@ -803,7 +803,7 @@ outliers (up to $|z|\approx5\cdot10^{3}$ here) wreck the statistic.}
 
 \begin{table}[htbp]
 \centering\scriptsize
-\caption{Pinned $z$-statistics (gate report, oct-d2 grids; see
+\caption{Recorded $z$-statistics (acceptance-check report, oct-d2 grids; see
 \texttt{plot/solver\_matrix/mc\_stats.csv}). The adjoint rows carry the
 F14 caveat: per-ordinate gaps are angle-limited, not noise-limited.}
 \label{tab:mcstats}
@@ -818,7 +818,7 @@ F14 caveat: per-ordinate gaps are angle-limited, not noise-limited.}
 \caption{$\delta$-M order 1 vs order 0 on the same octree grid (compare
 campaign): field difference and band-mean profiles against the
 642-ordinate reference. The converged field is nearly $\delta$-M
-independent (pinned band $1.5\cdot10^{-2}$ rms $J$), confirming the
+independent (recorded range $1.5\cdot10^{-2}$ rms $J$), confirming the
 $\delta$-M machinery conserves the solution while smoothing the phase
 function.}
 \label{fig:deltaM}
@@ -827,8 +827,8 @@ function.}
 \subsection{Findings F1--F14}
 \label{sec:findings}
 
-The findings log is part of the gate: each finding is either a fixed bug
-with a regression test, a pinned design difference, or an interpretation
+The findings log is part of the acceptance check: each finding is either a fixed bug
+with a stability check, a recorded design difference, or an interpretation
 rule. Table~\ref{tab:findings} summarizes; the interpretation rules that
 follow it are binding for any future number quoted from this project.
 
@@ -856,7 +856,7 @@ family (T4). \\
 F5 & common random numbers couple populations; CRN must stay off for
 inhomogeneous fields. \\
 F6 & Ng acceleration is not a wall-time win on this cloud; iteration
-counts pinned, ``no pathological slowdown'' asserted. \\
+counts recorded, ``no pathological slowdown'' asserted. \\
 F7 & octree closure residual = face-extrapolation error; $h_0$, not depth,
 sets closure accuracy. \\
 F8 & (guarded, rename pending) two same-named \texttt{heating\_rate}
@@ -864,7 +864,7 @@ helpers --- \texttt{diagnostics} (\texttt{kappa\_a, J, B}) and
 \texttt{mc.estimators} (\texttt{kappa\_a, B, J}) --- take their arguments
 in reversed order; mixing them up flips the sign of every
 heating/closure number (this caused a sign bug in the first T4 draft).
-The gate now asserts the sign (absorbed power $\le0$ at $B=0$);
+The acceptance check now asserts the sign (absorbed power $\le0$ at $B=0$);
 aliasing/renaming is the recorded follow-up. \\
 F9 & batch $\sigma$ is honest \emph{per cell} (A2 masked rms
 $z\approx1.06$ at 100 flights) but the aggregate per-cell $\sigma$
@@ -876,7 +876,7 @@ $h_0$ moves faces, not cell centers. \\
 F11 & unigrid chain/SC carry an $h$-independent grazing-ordinate transport
 error ($\approx12\%$ rms vs analytic $e^{-\tau}$ in the absorber limit;
 octree/march exact to $10^{-15}$). Unigrid plateaus $\approx4\%$ rms $J$
-from the octree reference at every resolution. Pinned as a finding;
+from the octree reference at every resolution. Recorded as a finding;
 invariant 3 is asserted per family. \\
 F12 & (fixed 2026-11-16) MC segment marcher left face-crossing times
 uninitialized for exactly axis-parallel directions ($dy=0$, $z$ poles):
@@ -943,9 +943,9 @@ characteristic marches, $\delta$-M, Ng acceleration, and a full
 all-sky ground; an independent Monte Carlo family (two-stage forward A1/A2,
 adjoint B, Woodcock tracking, MC ground, M6) that cross-validates the SC
 family with zero-noise identities at the $10^{-12}$ level and statistical
-agreement within measured bands; and a pinned, self-documenting validation
+agreement within measured reference ranges; and a recorded, self-documenting validation
 regime (135 tests, tiers T0--T5+M6) in which the two bugs the regime found
-(F12, F13) are fixed with regression guards and every remaining
+(F12, F13) are fixed with stability checks and every remaining
 imperfection is a named, measured, interpreted finding.
 
 Known limitations, all documented rather than hidden:
@@ -976,7 +976,7 @@ All numbers and figures in this report regenerate from the repository
 (miniforge environment \texttt{pyarts}, interpreter by absolute path):
 
 \begin{verbatim}
-# test gate (tiers T0-T5 + M6 + per-feature suites)
+# acceptance check (tiers T0-T5 + M6 + per-feature suites)
 ~/miniforge3/envs/pyarts/bin/python -m pytest -q
 ~/miniforge3/envs/pyarts/bin/python -m pytest -q -m "not slow"
 
@@ -999,10 +999,10 @@ Method schematics (Figs.~\ref{fig:directions}, \ref{fig:octree},
 solver's own geometry helpers, so they show the structures the solver
 actually uses. Validation and results figures
 (Figs.~\ref{fig:beerk}--\ref{fig:deltaM}) are re-solves or cache reads of
-the matrix runs: field maps use the pinned REF field from
+the matrix runs: field maps use the recorded REF field from
 \texttt{plot/solver\_matrix/\_solve\_cache/} and fresh solves of the
 ranked variants (bit-reproducible, cached); compare-campaign figures
-(Fig.~\ref{fig:toa}, Fig.~\ref{fig:deltaM}) read the pinned
+(Fig.~\ref{fig:toa}, Fig.~\ref{fig:deltaM}) read the recorded
 \texttt{plot/compare\_transport/\_solve\_cache/} runs (42-ordinate
 variants and the 642-ordinate reference). The three-dimensional HTML
 scene exports of the compare campaign

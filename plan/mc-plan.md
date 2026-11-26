@@ -101,7 +101,7 @@ M2 implementation notes (stage-2 radiance, `radiance_from_source` +
   there the deterministic estimator is validated against the closed-form
   Beer-Lambert integral instead.
 - **Statistics criterion**: aggregate z-scores (mean ~ 0, rms ~ 1, coverage)
-  on sigma-resolved cells, not raw pointwise 2-sigma bands — the binary
+  on sigma-resolved cells, not raw pointwise 2-sigma ranges — the binary
   tally's batch sigma collapses to 0 in optically thick cells and is ~10–20%
   low at 10 batches (see decisions log; measured rms z = 1.04–1.07,
   sigma ~ 1/sqrt(n_hist)).
@@ -191,7 +191,7 @@ M4 implementation notes (variance reduction + numba fast path):
   sample (5% rms sigma_J) and the *closed* MC route (j_mc lambda) costs
   349 s — SC wins the closed J field, plan expectation confirmed.
   Query B (all-sky image, 21 nodes, 20k seeds each): adjoint 6.3 s numpy /
-  1.2 s jit / 2.3 s jit+VR, 21/21 inside the M3 band, flux closure
+  1.2 s jit / 2.3 s jit+VR, 21/21 inside the M3 range, flux closure
   −0.2…−1.4% vs SC-42 — vs 15.1 s for SC which additionally must solve the
   whole domain.  Query C (single detector): 1.21 / 0.27 / 0.88 s; implicit
   capture halves sigma (1.36% -> 0.57%) at ~2x collisions.  Honest caveat:
@@ -393,7 +393,7 @@ Entry point `backward_detector_mc(grid, dg, kappa_e, kappa_s, S_total, tau_b, de
 ## 5. Estimators and error accounting (`rt3d/mc/estimators.py`)
 
 - **History batching**: histories grouped into `n_batches` (default 100); per
-  batch tallies -> mean, sample std, 2-sigma band. Every MC quantity in outputs
+  batch tallies -> mean, sample std, 2-sigma range. Every MC quantity in outputs
   carries its `sigma`.
 - Tallies: `J` per cell (Stage 1); `I[(cell, ordinate)]` (Stage 2); sensor
   radiance per (pixel, cone bin) (Solver B); heating-rate tally

@@ -117,7 +117,7 @@ band_s = 2.0 * sky_s["sigma_I"] + 0.05 * rms_s
 F_adj_s = float(dg.weights[up_idx] @ (mu_up * sky_s["I"]))
 F_sc_s = float(dg.weights[up_idx] @ (mu_up * Iref_s))
 print(f"slab all-sky (node dirs): {np.count_nonzero(dev_s <= band_s)}/{up_idx.size} "
-      f"inside 2 sigma + 5% rms-sky, max dev/band = "
+      f"inside 2 sigma + 5% rms-sky, max dev/range = "
       f"{(dev_s / band_s).max():.2f} ({t_sky_s:.1f}s, 21 x 20000 seeds)")
 print(f"slab hemispheric upward flux at detector: adjoint {F_adj_s:.5f}, "
       f"SC {F_sc_s:.5f}  (rel {100 * (F_adj_s - F_sc_s) / F_sc_s:+.2f}%)")
@@ -144,7 +144,7 @@ sc_c = lambda_iteration(oct_, dg, ko, ks_o, B_o, bc_c, g=g_o,
 # SC-42 per-ordinate top-of-cloud radiance carries large angular
 # quadrature error in the strongly anisotropic (g ~ 0.55) cloud — SC42 vs
 # SC162 differs by orders of magnitude at near-zero sky pixels — so the
-# per-node band uses an rms-sky-scaled absolute floor and the 162-ordinate
+# per-node range uses an rms-sky-scaled absolute floor and the 162-ordinate
 # column is shown as reference.  All-sky runs use exact node directions
 # (cone_scale = 0): full icosahedral caps (half-angle 24.6 deg) cross the
 # horizon at near-horizontal nodes and pick up top-lit DOWNWARD radiance,
@@ -172,7 +172,7 @@ dev_c = np.abs(sky_c["I"] - Iref_c)
 band_c = 2.0 * sky_c["sigma_I"] + 0.10 * np.sqrt(np.mean(Iref_c ** 2))
 inside_c = np.count_nonzero(dev_c <= band_c)
 print(f"cloud all-sky (node dirs): {inside_c}/{up_idx.size} inside "
-      f"2 sigma + 10% rms-sky, median dev/band = "
+      f"2 sigma + 10% rms-sky, median dev/range = "
       f"{np.median(dev_c / band_c):.2f} ({t_sky_c:.1f}s)")
 F_adj_c = float(dg.weights[up_idx] @ (mu_up * sky_c["I"]))
 F_sc_c = float(dg.weights[up_idx] @ (mu_up * Iref_c))

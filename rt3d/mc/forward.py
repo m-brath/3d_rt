@@ -389,7 +389,7 @@ def j_mc(
     -------
     dict with keys
         'J', 'sigma_J'      (n_cells,) diffuse mean intensity and its 1-sigma
-                            standard error (the plan's acceptance bands are
+                            standard error (the plan's reference ranges are
                             2 sigma)
         'F', 'sigma_F'      (n_cells, 3) flux vector and standard error
         'heating'           ``4 pi kappa_a (B - J)`` (invariant-4 side)

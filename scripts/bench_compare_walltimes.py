@@ -9,7 +9,7 @@ configurations) with the current solver and reports
     old wall  (stored in plot/compare_transport/_solve_cache/*.npz,
                measured pre-optimization on this machine)
     new wall  (this run)
-    max relative J difference vs the stored solution (validation gate:
+    max relative J difference vs the stored solution (acceptance check:
     optimization must not change converged solutions beyond
     transcendental-rounding level)
 

@@ -832,7 +832,7 @@ def fig_mcpower():
            yerr=errs, capsize=3, alpha=0.85)
     ax.set_xticks(xpos, labels, fontsize=6.5)
     ax.axhline(-0.0215 * P_sc, color="crimson", ls=":", lw=1.0)
-    ax.text(2.35, -0.0215 * P_sc, "T3 §4 all-sky band\n$-2.15\\%$ vs SC",
+    ax.text(2.35, -0.0215 * P_sc, "T3 §4 all-sky range\n$-2.15\\%$ vs SC",
             fontsize=6, color="crimson", ha="right")
     ax.set_ylabel("absorbed power $-$ SC (same grid)")
     ax.set_title("MC stage-1 vs SC; bars = batch $\\sigma$ (F9 caveat)")

@@ -15,7 +15,7 @@ Russian-roulette weight floor, on the forward chains (`track_histories` /
   3. adjoint walk, omega = 0.9 (where implicit capture matters most):
      match + improved sigma
   4. forward j_mc explicit variant: VR matches the analog J per cell within
-     combined 2 sigma + 5% band at equal cost; variance-neutral here —
+     combined 2 sigma + 5% range at equal cost; variance-neutral here —
      explicit-chain noise is birth-statistics dominated (chains short),
      reported honestly in plan/plan.md
   5. traceability: switches recorded in the track_histories output

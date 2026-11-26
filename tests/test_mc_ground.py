@@ -22,7 +22,7 @@ tested here against a closed-form answer:
   ground scores ``eps_g B_g`` plus ``A_g F_beam / pi`` and then continues
   cosine-weighted with ``wt *= A_g``.
 
-Conventions pinned here (measured, see plan section 7):
+Conventions recorded here (measured, see plan section 7):
 
 * MC ``J`` is the **angle-averaged** mean intensity ``int I dOmega / 4pi``:
   a Lambertian ground of radiance ``B_g`` in vacuum gives ``J = B_g / 2``
@@ -272,7 +272,7 @@ def test_adjoint_beam_score_over_ground():
 # feeding the MC deterministic stage-2 march the SC-consistent ground radiance
 # must reproduce the SC all-sky solve: the z-entry ordinate is a pure z path
 # (no staircase, F11-free) and must match to ~1e-2 (discretisation of the
-# ground column); oblique ordinates carry the pinned F11 march-vs-chain gap.
+# ground column); oblique ordinates carry the recorded F11 march-vs-chain gap.
 
 
 def test_stage2_ground_I_matches_sc_solver():
@@ -301,7 +301,7 @@ def test_stage2_ground_I_matches_sc_solver():
     assert dev_z < 2e-2, f"z-entry ordinate dev {dev_z:.3e} (measured 7.5e-3)"
     dev_all = np.max(np.abs(mc["I"] - res["I"]))
     assert dev_all < 0.35, (
-        f"march-vs-chain oblique gap moved: {dev_all:.3e} (F11 band, "
+        f"march-vs-chain oblique gap moved: {dev_all:.3e} (F11 reference range, "
         "measured 2.8e-1)")
 
 

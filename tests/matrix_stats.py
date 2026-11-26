@@ -293,7 +293,7 @@ def gaussian_tail(k):
 def hypothetically_clean(stats, n_min=None):
     """
     Structural sanity of a z distribution: mean consistent with 0 and rms in
-    the Gaussian band.  Used as a self-test of the statistics helpers
+    the expected Gaussian spread.  Used as a self-test of the statistics helpers
     themselves (synthetic Gaussian data must pass, heavy-tailed data must
     not).
     """
@@ -333,7 +333,7 @@ def assert_banded(value, lo, hi, label):
     value = float(value)
     if not (lo <= value <= hi):
         raise AssertionError(
-            f"{label}: measured {value:.6g}, outside the pinned band "
+            f"{label}: measured {value:.6g}, outside the recorded reference range "
             f"[{lo:.6g}, {hi:.6g}] (plan/solver-test-matrix-plan.md section 2)"
         )
 

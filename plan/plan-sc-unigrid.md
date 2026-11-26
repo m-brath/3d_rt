@@ -125,7 +125,7 @@ New file `rt3d/short_characteristics.py`:
    *not* shrink with h, because the discrete recursion's effective direction is
    set by the bilinear weights, not by Omega (verification invariant 3 is exact only
    for true-ray schemes; documented in `docs/sc-transport.md` §12.2/§12.5 and
-   pinned by `test_transmittance_staircase_error`; corrected 2026-11-16 after
+   fixed by `test_transmittance_staircase_error`; corrected 2026-11-16 after
    the T5 ladder probes measured the same h-independent error in the `chain`
    sweep — plan/solver-test-matrix-plan.md finding F11).
 4. Slab + Gaussian cloud: SC converges toward the reference as h -> 0; SC vs.

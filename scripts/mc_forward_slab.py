@@ -18,7 +18,7 @@ Solvers compared:
 
 MC transport is angle-exact; the MC-vs-reference deviations are statistical
 (batch sigma) plus the reference's own cell discretization.  Error bars are
-2 sigma history-batch bands; energy closure (verification invariant 4) is checked
+2 sigma history-batch reference ranges; energy closure (verification invariant 4) is checked
 globally: net downward face flux vs total absorption 4 pi kappa_a int J dz.
 """
 
@@ -112,10 +112,10 @@ for omega in OMEGAS:
         band12 = max(s12, 0.03 * J_ref.max())
         print(
             f"  {tag}: max|dJ|/J_top = {dev.max() / J_ref.max() * 100:6.2f}% "
-            f"(band {band / J_ref.max() * 100:5.2f}%) "
+            f"(range {band / J_ref.max() * 100:5.2f}%) "
             f"{'OK' if dev.max() <= band else 'FAIL'} | "
             f"vs {cmp_r['stage1']} MC: {d12.max() / J_ref.max() * 100:5.2f}% "
-            f"(band {band12 / J_ref.max() * 100:5.2f}%) "
+            f"(range {band12 / J_ref.max() * 100:5.2f}%) "
             f"{'OK' if d12.max() <= band12 else 'FAIL'} | "
             f"{wall:5.1f}s"
         )
@@ -150,7 +150,7 @@ for omega in OMEGAS:
     print(f"  closure SC      : rel err = {(net_sc - absorbed_sc) / absorbed_sc * 100:+.2f}%")
     print()
 
-# %% plot: J(tau from top) with 2 sigma MC bands
+# %% plot: J(tau from top) with 2 sigma MC ranges
 fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.6))
 for ax, omega in zip(axes, OMEGAS):
     r = results[omega]
@@ -171,7 +171,7 @@ for ax, omega in zip(axes, OMEGAS):
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
 fig.suptitle("MC phase M1: stage-1 J on the 1D slab "
-             "(bands = 2 sigma history-batch)")
+             "(ranges = 2 sigma history-batch)")
 fig.tight_layout()
 fig.savefig("plot/mc_forward_slab.png", dpi=150)
 print("  -> plot/mc_forward_slab.png")

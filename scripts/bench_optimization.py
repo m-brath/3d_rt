@@ -12,7 +12,7 @@ Reproduces the measured baseline table of the optimization plan:
     stencil_for_direction cost
 
 Every stage is timed; memory is measured from the array sizes.  Options
-select which stages run so the script is usable as a quick regression check.
+select which stages run so the script is usable as a quick stability check.
 
 Run from the repo root:
     macOS/Linux:  ~/miniforge3/envs/pyarts/bin/python scripts/bench_optimization.py

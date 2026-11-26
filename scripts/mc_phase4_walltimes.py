@@ -182,7 +182,7 @@ for tag, kw in (("numpy            ", {}),
     sig_mean = float(np.mean(sky["sigma_I"] / np.maximum(np.abs(sky["I"]), 1e-12)))
     sky_runs[tag.strip()] = sky
     print(f"  {tag} wall {dt:7.2f}s  inside 2sig+10%rms: {inside:2d}/{up_idx.size}"
-          f"  median dev/band {med:4.2f}  mean rel sigma {sig_mean * 100:5.2f}%  "
+          f"  median dev/range {med:4.2f}  mean rel sigma {sig_mean * 100:5.2f}%  "
           f"upward flux {F:.5f} ({100 * (F - F_sc) / F_sc:+.2f}% vs SC-42)")
 print(f"  SC equivalent of this query = query A wall ({t_sc:.1f}s): SC only "
       "gets I(cell, ordinate) after the FULL domain converged; the adjoint "

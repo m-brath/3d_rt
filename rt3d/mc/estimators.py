@@ -35,7 +35,7 @@ times area — the tally then has intensity units):
 Error accounting follows plan section 5: histories are grouped into
 ``n_batches`` contiguous batches, every tally is accumulated per batch, and
 ``sigma`` is the batch-mean standard error (``ddof=1``); the plan's acceptance
-bands are 2 sigma.
+reference ranges are 2 sigma.
 """
 
 import numpy as np
@@ -163,7 +163,7 @@ class track_tally(object):
         is ``sqrt(n_batches) * std(batch tallies, ddof=1)``, i.e. each batch
         tally is rescaled by ``n_batches`` so that it alone estimates the
         full-population value (standard history-batching).  Report 2 sigma
-        bands as ``2 * sigma`` (plan section 5).
+        reference ranges as ``2 * sigma`` (plan section 5).
 
         Parameters
         ----------

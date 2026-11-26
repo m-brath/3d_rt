@@ -634,7 +634,7 @@ delta-M $M=1$, Ng → Ng + delta-M $M=1$):
 | 0.9 | 69 → 14 | 90 → 15 |
 | 0.95 | 65 → 11 | 82 → 11 |
 
-($M = 2$ at $g = 0.9$: 77 → 23 plain LI; the regression test
+($M = 2$ at $g = 0.9$: 77 → 23 plain LI; the stability check
 `tests/test_delta_m.py::test_solver_acceleration_delta_M1` at
 $n_z = 8$, $\mathrm{tol} = 10^{-6}$, $g = 0.95$: 62 → 12.)
 
@@ -707,7 +707,7 @@ beam $w = F_0\,|\boldsymbol\Omega_{\mathrm{sun}}\cdot
 \mathbf n_{\mathrm{face}}|\,A/n$, volume source $w = 4\pi Q/n$ — the tally
 then carries intensity units. Histories are grouped into `n_batches`
 contiguous batches and $\sigma$ is the batch-mean standard error
-(`ddof=1`); the plan's acceptance bands are 2σ. Note finding **F3**:
+(`ddof=1`); the plan's reference ranges are 2σ. Note finding **F3**:
 *per-cell* MC z-scores are heavy-tailed — the matrix tests use pooled
 statistics (`tests/matrix_stats.py`); never read a single-cell z-score as a
 test.
@@ -1774,21 +1774,21 @@ for tag, r, wall in (("lambda", r_lam, t_lam), ("explicit", r_exp, t_exp)):
     dev = np.abs(col(r["J"]) - J_ref)
     band = 2.0 * r["sigma_J"].max() + 0.03 * J_ref.max()
     print(f"MC stage1={tag}: max|J-J_ref|/max J_ref = "
-          f"{dev.max()/J_ref.max()*100:5.2f}% (band "
+          f"{dev.max()/J_ref.max()*100:5.2f}% (range "
           f"{band/J_ref.max()*100:5.2f}%), mean J {col(r['J']).mean():.4f} "
           f"vs ref {J_ref.mean():.4f}, wall {wall:.1f} s")
 ```
 
-Verified output (macOS/arm64; the band = 2σ + 3% reference cell
+Verified output (macOS/arm64; the range = 2σ + 3% reference cell
 discretization, the acceptance rule of `scripts/mc_forward_slab.py` — the
-band is dominated by the per-cell σ of near-vacuum cells, finding F3):
+range is dominated by the per-cell σ of near-vacuum cells, finding F3):
 
 ```text
-MC stage1=lambda: max|J-J_ref|/max J_ref =  4.12% (band  8.98%), mean J 0.2403 vs ref 0.2350, wall 16.8 s
-MC stage1=explicit: max|J-J_ref|/max J_ref =  2.89% (band  6.53%), mean J 0.2323 vs ref 0.2350, wall 1.4 s
+MC stage1=lambda: max|J-J_ref|/max J_ref =  4.12% (range  8.98%), mean J 0.2403 vs ref 0.2350, wall 16.8 s
+MC stage1=explicit: max|J-J_ref|/max J_ref =  2.89% (range  6.53%), mean J 0.2323 vs ref 0.2350, wall 1.4 s
 ```
 
-Both variants sit inside the band; the λ variant needs one fresh photon set
+Both variants sit inside the range; the λ variant needs one fresh photon set
 *per iteration* (hence the 10× wall time and the F5 noise floor in
 `history`), while the explicit variant finishes the whole field in one shot
 with ≈ 40 scattering generations (`n_generations`). For the
@@ -1828,7 +1828,7 @@ figures to `plot/`. Run any of them as
 | script | what it validates |
 |---|---|
 | `mc_phase0_check.py` | M0 tracker: flight distribution + event fractions, HG samples vs `hg_matrix` moments (invariant-2 companion), MC beam transmittance $= e^{-\tau}$ on both grids and both majorant modes, cell vs global mode agreement. |
-| `mc_forward_slab.py` | M1 stage-1 $J$ on the phase-2 slab: λ variant (fresh / CRN / Ng) and explicit chains vs the 64-GL discrete-ordinates reference, with 2σ bands (shared case `rt3d.cases.slab_1d`). |
+| `mc_forward_slab.py` | M1 stage-1 $J$ on the phase-2 slab: λ variant (fresh / CRN / Ng) and explicit chains vs the 64-GL discrete-ordinates reference, with 2σ reference ranges (shared case `rt3d.cases.slab_1d`). |
 | `mc_forward_cloud.py` | M2 stage-2 radiance $I(\text{cell}, \text{ordinate})$ on the cloud **octree**, where MC and SC share the exact marches — purely statistical differencing. |
 | `mc_backward.py` | M3 adjoint detector MC: all-sky consistency (one detector per upward ordinate at exact node direction) vs SC columns on slab + cloud, and the efficiency argument (point query at fixed cost). |
 | `mc_compare.py` | M5 integration pass: full chain A1 → A2 → B vs SC on one setup, energy closure over the whole MC chain (the head-to-head report). |
@@ -1841,7 +1841,7 @@ figures to `plot/`. Run any of them as
 | `compare_transport.py` | transport-scheme comparison (unigrid chain vs single-cell sc vs octree, ± delta-M) on the §12 worked example; caches solves in `plot/compare_transport/_solve_cache/` (plan/compare-transport-plan.md). |
 | `solver_matrix.py` | the solver-matrix report runner (plan/solver-test-matrix-plan.md §9): one physical setup, every variant → `matrix.csv`, `ranking.csv`, `convergence.csv`, `mc_stats.csv` + figures under `plot/solver_matrix/`; cached reruns are seconds. |
 | `bench_optimization.py` | reproduces the optimization-plan baseline table (march cost/memory, sweep costs, scattering matmul). |
-| `bench_compare_walltimes.py` | before/after wall-clock of the solver optimizations vs the cached `compare_transport.py` solutions (validation gate: max relative $\Delta J$). |
+| `bench_compare_walltimes.py` | before/after wall-clock of the solver optimizations vs the cached `compare_transport.py` solutions (acceptance check: max relative $\Delta J$). |
 | `sc_transport_figures.py` | schematic figures for `docs/sc-transport.md` (§6). |
 | `report_figures.py` | vector PDF figures + LaTeX table fragments for the project report (`report/`). |
 
@@ -2018,7 +2018,7 @@ plus the six-tier **cross-solver matrix** (full spec + findings log F1–F14
 in `plan/solver-test-matrix-plan.md`, shared case `tests/matrix_cases.py`,
 pooled-statistics helpers `tests/matrix_stats.py`):
 
-| tier | module | what it pins |
+| tier | module | what it records |
 |---|---|---|
 | T0 | `test_matrix_invariants.py` | invariants swept over every solver variant, no full solve |
 | T1 | `test_matrix_equivalence.py` | deterministic variant equivalence (chain / sc / octree, ±delta-M, ±Ng) |

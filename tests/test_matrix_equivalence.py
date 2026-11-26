@@ -12,11 +12,11 @@ and ``test_jit.py`` already cover):
   (threaded per-ordinate sweeps): agreement at round-off.
 * δ-M 0/1/2: the explicit ``-omega g**M I`` term is discretized with the
   same short-characteristics stencil, so the converged fields differ by an
-  O(tau_cell) band -- pinned from measurement, not assumed zero.
+  O(tau_cell) range -- recorded from measurement, not assumed zero.
 * Ng acceleration vs plain lambda iteration: same fixed point, fewer
   iterations.
 * ``chain`` vs ``sc`` transport: two independent discretizations of the same
-  RTE; the band is the documented angular stencil error of oblique ordinates
+  RTE; the range is the documented angular stencil error of oblique ordinates
   and is *not* a solver defect (it shrinks with the cell size, T5 ladder).
 * ground on/off, beam on/off, periodic vs non-periodic: structure checks,
   linearity in the boundary drive, and the exact "vacuum ground" identity
@@ -25,10 +25,10 @@ and ``test_jit.py`` already cover):
 * guards: ``transport="sc"`` on an octree raises ``ValueError``, a variable
   ground height raises ``NotImplementedError``, vacuum cells stay finite.
 
-All bands were measured on 2026-11-16 (Apple M4 Pro, 42 ordinates,
+All reference ranges were measured on 2026-11-16 (Apple M4 Pro, 42 ordinates,
 ``omega_cap = 0.9``, ``tol = 1e-6``) and are recorded in
-plan/solver-test-matrix-plan.md section 2.  A failing band means either a
-real regression or a deliberate accuracy change that must re-pin the band.
+plan/solver-test-matrix-plan.md section 2.  A failing reference range means either a
+real drift or a deliberate accuracy change that must re-record the range.
 """
 
 import numpy as np
@@ -95,7 +95,7 @@ def test_octree_jit_matches_numpy_reference(oct2):
 
 
 # =============================================================================
-# delta-M: same fixed point up to the explicit-term discretization band
+# delta-M: same fixed point up to the explicit-term discretization range
 # =============================================================================
 
 def test_delta_m_unigrid_bands(u24):
@@ -129,7 +129,7 @@ def test_delta_m_unigrid_bands(u24):
 
 def test_delta_m_octree_bands(oct2):
     """
-    The same δ-M band on the octree, where the explicit term is integrated
+    The same δ-M range on the octree, where the explicit term is integrated
     along exact characteristics (measured ΔJ/J = 1.3e-2, ΔI/I = 2.6e-2).
     """
     ref = solve_cloud(oct2, ng=True, delta_M=0)
@@ -170,7 +170,7 @@ def test_ng_iteration_cost_is_bounded(u24, oct2):
     Measured on the omega <= 0.9 cloud at tol = 1e-6: u24^3 charges
     57 (Ng) vs 34 (LI) sweeps -- a 1.7x penalty, because the spectral
     radius is already small there -- while the octree d2 saves a little
-    (27 vs 30).  The bands below are "no regression" guards: they fail if
+    (27 vs 30).  The reference ranges below are stability checks: they fail if
     the acceleration starts oscillating or stops being applied at all.
     """
     ng_u = solve_cloud(u24, ng=True, delta_M=0)
@@ -209,7 +209,7 @@ def test_chain_vs_sc_same_physics(u24):
 
 
 def test_chain_vs_sc_with_ground(u24):
-    """The same band with the Lambertian ground active (measured 0.31/0.94)."""
+    """The same range with the Lambertian ground active (measured 0.31/0.94)."""
     chain = solve_cloud(u24, bc="ground", albedo=0.3, ng=True, delta_M=1)
     sc = solve_cloud(u24, bc="ground", albedo=0.3, ng=True, delta_M=1,
                      transport="sc")
@@ -285,7 +285,7 @@ def test_beam_and_periodic_sides_change_the_field(u24):
     """
     Structure: the solar beam matters, and so do the periodic sides.
 
-    Not an accuracy band -- this only guards against a silently dropped
+    Not an accuracy range -- this only guards against a silently dropped
     ``beam`` or ``periodic_box`` in the solver plumbing.
     """
     ref = solve_cloud(u24, ng=True, delta_M=1)

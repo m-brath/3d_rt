@@ -129,7 +129,7 @@ g ≤ 0.95 at 1e-6. Keep the bucket path as reference; switch by option.
 5. Re-run `scripts/compare_transport.py` wall-clock table as the before/
    after benchmark.
 
-## 10. Validation gates (all steps)
+## 10. Acceptance checks (all steps)
 
 - Full `pytest tests/` suite green after each step.
 - Physics invariants of AGENTS.md: sum(w)=4π; HG ∫ΦdΩ=1; exp(−tau) transmittance;

@@ -4,7 +4,7 @@ MC phase M1 invariants (plan/mc-plan.md section 7): stage-1 mean intensity
 ``J`` by both MC variants against the phase-2 references.
 
   1. 1D slab (tau=5, g=0, omega in {0.5, 0.9}): MC ``J(z)`` matches the 1D
-     discrete-ordinates reference within the combined 2 sigma band plus a
+     discrete-ordinates reference within the combined 2 sigma range plus a
      discretization allowance (the reference is a cell-center solution, MC
      tallies cell averages; MC transport itself is angle-exact)
   2. the lambda-iteration and explicit-scattering variants agree with each
@@ -92,12 +92,12 @@ def test_slab_j_vs_1d_do_lambda(d1o_half):
     J, sJ = col(r["J"]), col(r["sigma_J"])
     dev = np.abs(J - d1o_half)
     assert dev.max() <= 2.0 * sJ.max() + 0.03 * d1o_half.max()
-    # 90% of the cells must sit inside the pure statistical 2 sigma band
+    # 90% of the cells must sit inside the pure statistical 2 sigma range
     assert np.count_nonzero(dev <= 2.0 * sJ + 1e-4) >= 0.9 * grid.nz
 
 
 def test_slab_j_vs_1d_do_explicit(d1o_half):
-    """explicit variant: same acceptance band as the lambda variant."""
+    """explicit variant: same acceptance range as the lambda variant."""
     grid, box, hz, col = _slab()
     ke = np.full(grid.n_cells, 1.0)
     bc = boundary_conditions(top_I=1.0)
@@ -129,7 +129,7 @@ def test_slab_kappa_scaling_emission_convention(d1o_half):
     """
     Birth weights must carry the emission rate kappa_e * S: at fixed optical
     depth tau = kappa_e * L the slab solution is identical, so a kappa_e = 2
-    run must match the kappa_e = 1 reference within the same statistical band
+    run must match the kappa_e = 1 reference within the same statistical range
     (a missing kappa_e factor would bias J strongly and diverge the LI).
     """
     grid, box, hz, col = _slab(kappa_e=2.0)
@@ -276,7 +276,7 @@ def test_beam_lambda_matches_explicit():
     sig = np.hypot(rx["sigma_J"], rl["sigma_J"])
     # batch sigma underestimates the per-iteration fluctuation of a lambda
     # iterate (accumulated source noise, amplified ~ 1/(1 - omega)), so the
-    # pointwise band gets a 4 sigma allowance; outliers must stay bounded
+    # pointwise range gets a 4 sigma allowance; outliers must stay bounded
     assert np.count_nonzero(dev <= 4.0 * sig) >= 0.9 * grid.n_cells
     assert dev.max() <= 8.0 * sig.max()
 

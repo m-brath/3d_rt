@@ -18,9 +18,9 @@ physical setup** and writes the report artifacts:
                         capability_matrix.png
 
 The physical setup, grids, direction grid and solve options are the ones the
-pytest gate uses (`tests/matrix_cases.py`), so the numbers in this report are
-the *same* numbers the pinned bands were measured from — the report and the
-gate cannot drift apart.
+pytest acceptance check uses (`tests/matrix_cases.py`), so the numbers in this report are
+the *same* numbers the reference ranges were measured from — the report and the
+acceptance check cannot drift apart.
 
 Reference: octree tau_max 0.5, max_depth 5 (the plan's REF rung).  The
 642-ordinate reference (`--reference-ordinates 3`) is opt-in: it is ~15x the
@@ -425,7 +425,7 @@ matrix_rows.append(dict(
 
 # B adjoint all-sky at a few leaves, vs the SC columns (masked z per seed).
 # Pick leaves INSIDE the cloud core (highest kappa_a along each z-slab) --
-# like the T3 gate's fixed probe points; a near-vacuum leaf would put the
+# like the T3 acceptance check's fixed probe points; a near-vacuum leaf would put the
 # z denominator entirely in the F14 quadrature-normalization gap.
 sel = np.argsort(oct2.centers[:, 2])
 leaf_pts = []

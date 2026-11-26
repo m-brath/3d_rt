@@ -8,7 +8,7 @@ This is the tier that turns "variant A and variant B disagree by 31 %" into
 "both converge, at measured rates, to measured limits".  Errors are measured
 against a *finer grid of the same family* rather than against another variant,
 so a shared bias cannot hide as agreement — and, per plan findings F10/F11,
-gaps **between** families are pinned as bands with a stated cause rather than
+gaps **between** families are recorded as reference ranges with a stated cause rather than
 asserted to vanish.
 
 Design decisions that the ladder probes forced (plan findings F10 and F11, all
@@ -30,7 +30,7 @@ asserted below):
   grazing-ordinate error — 11–14 % rms against the analytic exponential in
   the pure-absorber limit, where the octree sweep is exact to round-off.
   Verification invariant 3 is therefore stated **per family** below, and the
-  unigrid-vs-march gap is pinned as an h-independent band.
+  unigrid-vs-march gap is recorded as an h-independent range.
 * **Convergence of the iteration is a precondition**, not an afterthought: a
   rung solved to a loose tolerance measures its iteration error, and the
   slope fit then reports nonsense.  Every rung here is solved with
@@ -39,7 +39,7 @@ asserted below):
 * **Monte Carlo order is measured by seed splitting**, not against the
   deterministic reference: the unigrid-vs-octree transport bias of this case
   (~4 % rms J, F11) is larger than the statistical error at every history
-  count the gate can afford, so a deviation-vs-reference fit cannot see
+  count the acceptance check can afford, so a deviation-vs-reference fit cannot see
   ``N^-0.5`` at all.
 
 Yardstick: ``octree tau_max 0.25, depth 7`` (the τ criterion needs level 6, so
@@ -85,7 +85,7 @@ YARD_TAU, YARD_DEPTH = 0.25, 7
 SUFF_TAU = 0.125
 REF_TAU, REF_DEPTH = 0.5, 5
 
-# pinned acceptance intervals (measured first, then frozen — plan section 3)
+# recorded acceptance intervals (measured first, then frozen — plan section 3)
 SLOPE_BAND = (0.6, 1.6)
 TAU_SLOPE_BAND = (0.3, 1.0)
 MC_SLOPE_BAND = (-0.65, -0.35)
@@ -221,7 +221,7 @@ def test_octree_yardstick_is_sufficient(ref, yard, sufficiency):
     **saturates below τ ≈ 1**: further τ refinement at fixed ``h0`` stops
     paying (the octree's internal convergence floor at this base lattice is
     ≈ 7e-3 rms J, same magnitude as the REF-vs-yardstick error itself).  The
-    band below pins that floor; a yardstick whose self-error grew past it
+    reference range below fixes that floor; a yardstick whose self-error grew past it
     would mean the octree family stopped being self-consistent.
     """
     yard_grid, yard_res, _t = yard
@@ -241,7 +241,7 @@ def test_octree_yardstick_is_sufficient(ref, yard, sufficiency):
     assert_banded(emax, 1e-2, 1e-1, "reference rung self-error (max J)")
     assert abs(erms - REF_SELF_ERROR) < 4e-3, (
         f"reference self-error moved to {erms:.3e}; REF_SELF_ERROR = "
-        f"{REF_SELF_ERROR:.3e} — re-pin the ladder bands")
+        f"{REF_SELF_ERROR:.3e} — re-record the ladder reference ranges")
 
     sref, s = observables(ref_grid, ref_res), observables(yard_grid, yard_res)
     for key in ("out_top", "out_bottom", "power", "mean_J"):
@@ -278,8 +278,8 @@ def test_octree_tau_criterion_ladder_converges(yard):
     is not monotone** (measured 5.29e-2 → 5.13e-2 → 5.26e-2), and neither is
     **mean_J** at the finest rungs (3.0e-4 → 2.7e-4 → 3.2e-4): the worst
     cells and the volume average alike sit at the τ-saturation floor of the
-    base lattice, not at the cloud-resolution rung — both are pinned as
-    bands instead (F10, saturation floor).
+    base lattice, not at the cloud-resolution rung — both are recorded as
+    ranges instead (F10, saturation floor).
     """
     yard_grid, yard_res, _t = yard
     rows = ladder(TAU_RUNGS, yard_grid, yard_res)
@@ -290,10 +290,10 @@ def test_octree_tau_criterion_ladder_converges(yard):
                       f"octree tau ladder: finest rung error in {key}")
     for label, e, dt, _sol in rows:
         assert_banded(e["J_max"], 0.03, 0.08,
-                      f"octree tau ladder {label}: max-J floor band")
+                      f"octree tau ladder {label}: max-J floor range")
     assert_monotone(rows[:-1], "mean_J", "octree tau ladder (mean_J rungs)")
     assert_banded(rows[-1][1]["mean_J"], 0.0, 5e-4,
-                  "octree tau ladder: REF-rung mean_J floor band")
+                  "octree tau ladder: REF-rung mean_J floor range")
 
     taus = [float(t) for t in (8.0, 4.0, 2.0, 1.0, REF_TAU)]
     slope_tau = loglog_slope(taus, [e["J_rms"] for _l, e, _d, _s in rows])
@@ -345,7 +345,7 @@ def test_octree_base_cell_barely_moves_the_field(ref):
     closure, finding F7), not for the cell-centered radiation field.
 
     So the 4 % unigrid-vs-octree gap of section 6 is not the base lattice:
-    its cause is pinned in section 6 itself (finding F11).
+    its cause is documented in section 6 itself (finding F11).
     """
     ref_grid, ref_res, _tr = ref
     ref_obs = observables(ref_grid, ref_res)
@@ -381,7 +381,7 @@ def test_unigrid_ladder_converges_in_its_own_family(u96):
       (1.09e-2, 7.18e-3, 6.72e-3, fitted slope 0.35): the F11 transport
       error is a structured grazing-ordinate pattern that changes shape
       with h instead of nesting.  Fitting *that* to first order would be
-      wrong, so it is only asserted monotone and pinned as a band.
+      wrong, so it is only asserted monotone and bounded by a recorded range.
     """
     yard_grid, yard_res, _t = u96
     rows = ladder(UNI_RUNGS, yard_grid, yard_res)
@@ -429,7 +429,7 @@ def test_invariant3_pure_absorber_holds_per_family():
     """
     AGENTS.md verification invariant 3 (`kappa_s = 0`, `B = 0` -> transmittance
     = `exp(-tau)` along *every* ray), stated **per transport family** — the
-    ladder probes showed it is family-dependent, and the plan pins it that
+    ladder probes showed it is family-dependent, and the plan records it that
     way (finding F11).
 
     Pure absorber (uniform ``kappa_e``, ``kappa_s = 0``, ``B = 0``, no beam,
@@ -447,7 +447,7 @@ def test_invariant3_pure_absorber_holds_per_family():
     | unigrid `chain` sweep   | **rms 1.16e-1, max 2.8e-1** | **rms 1.40e-1, max 3.2e-1** |
 
     The unigrid stencil's effective path is the cell-to-cell staircase
-    (documented in `docs/sc-transport.md` §12.2/§12.5, pinned for `sc` by
+    (documented in `docs/sc-transport.md` §12.2/§12.5, recorded for `sc` by
     `test_short_characteristics.py::test_transmittance_staircase_error`);
     the error is bounded and resolution-independent, not a bug.
     """
@@ -511,12 +511,12 @@ def test_unigrid_chain_transport_error_is_resolution_independent(ref, u96):
     | u24^3 | 3.98e-2 | 0.6006 / 0.5827 |
     | u48^3 | 3.95e-2 | 0.6012 / 0.5836 |
 
-    Pinned: every rung's error lies in the same band and u48 is not better
+    Recorded: every rung's error lies in the same range and u48 is not better
     than u12 by more than a few percent.  The chain-vs-march offset in the
-    volume-mean J is pinned at 2–5 %.
+    volume-mean J is recorded at 2–5 %.
 
     This is why the unigrid ladder of section 5 is fitted **within** the
-    family, and why the unigrid-vs-octree-reference gap is pinned here
+    family, and why the unigrid-vs-octree-reference gap is recorded here
     rather than asserted to converge: the octree reference (volume-mean J
     0.58321) agrees with the unigrid *exact march* (0.5827 at u24) to 0.1 %,
     while the unigrid chain solution sits 3 % higher.
@@ -547,7 +547,7 @@ def test_unigrid_chain_transport_error_is_resolution_independent(ref, u96):
     assert errs[2] > 0.8 * errs[0], (
         f"the unigrid transport error shrank by refinement ({errs}) — the "
         "resolution-independence of F11 no longer holds; re-check the "
-        "staircase analysis and re-pin the bands")
+        "staircase analysis and re-record the reference ranges")
 
     for mean_c, mean_m in means:
         assert_banded(abs(mean_c - mean_m) / abs(mean_m), 0.02, 0.05,
@@ -562,7 +562,7 @@ def test_unigrid_chain_transport_error_is_resolution_independent(ref, u96):
     assert erms > 5 * REF_SELF_ERROR, (
         f"the cross-family gap ({erms:.3e}) collapsed toward the reference "
         f"self-error ({REF_SELF_ERROR:.3e}) — either the unigrid transport "
-        "was fixed (re-pin everything) or a regression equalised them by luck")
+        "was fixed (re-record everything) or a drift equalised them by luck")
 
 
 COST_RUNGS = (
@@ -631,7 +631,7 @@ def test_delta_m_does_not_cancel_refinement(ref):
     Measured at the reference rung (oct tau 0.5 d5, converged both ways):
     delta-M off moves J by only **4.5e-4 rms** (delta-M 2 by 1.6e-4), i.e.
     ~10x *smaller* than the rung's refinement self-error (5.5e-3) — delta-M
-    is not the reference's dominant error term, the pinned transport/grid
+    is not the reference's dominant error term, the recorded transport/grid
     errors are.  Its real effect is on the **iteration count**: 90 vs 17 on
     u24 (44 vs 18 on u48).  And it does not interact with the plateau: the
     u24 rung sits at 4.094e-2 (off) vs 4.103e-2 (on) rms J against the
@@ -690,7 +690,7 @@ def test_mc_error_falls_as_1_over_sqrt_N():
     (the domain-integrated power is anti-correlated across cells — nearly
     conserved by construction).  The per-cell sigma is a per-cell statement;
     only the seed split measures the aggregate (finding F9, aggregate
-    side).  Pinned instead: the power error drops by >= 2.5x from N to 4N
+    side).  Recorded instead: the power error drops by >= 2.5x from N to 4N
     for the first two doublings and stays below 5e-4 at high statistics.
     """
     grid = cloud_octree(2.0, 2)

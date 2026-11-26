@@ -1,26 +1,26 @@
-# Solver test matrix — tiers, pinned bands, findings
+# Solver test matrix — tiers, reference ranges, findings
 
-The full cross-solver validation gate for `rt3d`: every solver variant of both
+The full cross-solver acceptance check for `rt3d`: every solver variant of both
 families (short characteristics and Monte Carlo) runs on one physical setup,
 correctness is established against a **fine-octree reference and refinement
 ladders** (not just pairwise agreement), and every accepted imperfection is
-**pinned as a regression band** with a measured cause.
+**recorded as a reference range** with a measured cause.
 
 Design document (decisions, probe history): `plan/solver-test-matrix-plan.md`.
-This page is the readable summary: what each tier asserts, which bands are
-pinned, and what the findings F1–F14 mean for interpreting the numbers.
+This page is the readable summary: what each tier asserts, which reference ranges are
+recorded, and what the findings F1–F14 mean for interpreting the numbers.
 
 Two front ends share the same helpers (`tests/matrix_cases.py`,
-`tests/matrix_stats.py`), so gate and report cannot drift apart:
+`tests/matrix_stats.py`), so acceptance check and report cannot drift apart:
 
 | front end | what it is |
 |---|---|
-| `pytest tests/test_matrix_*.py` | the gate (T0–T5), markers `slow` / `mc` / `reference` (`pytest.ini`) |
+| `pytest tests/test_matrix_*.py` | the acceptance check (T0–T5), markers `slow` / `mc` / `reference` (`pytest.ini`) |
 | `scripts/solver_matrix.py` | the report: CSVs + figures under `plot/solver_matrix/`, disk solve cache in `plot/solver_matrix/_solve_cache/` (gitignored) |
 
 ```sh
 ~/miniforge3/envs/pyarts/bin/python -m pytest -q                     # everything
-~/miniforge3/envs/pyarts/bin/python -m pytest -q -m "not slow"       # gate without ladders
+~/miniforge3/envs/pyarts/bin/python -m pytest -q -m "not slow"       # acceptance check without ladders
 ~/miniforge3/envs/pyarts/bin/python scripts/solver_matrix.py         # report (~10 min)
 ```
 
@@ -46,17 +46,17 @@ outputs, used to bound the reference's own error): `tau_max 0.25, depth 7`
 | tier | file | asserts | scale |
 |---|---|---|---|
 | T0 | `test_matrix_invariants.py` | AGENTS.md invariants 1–3 per variant (direction weights, HG normalization incl. MC samplers, Beer-Lambert on identical rays for chain/sc/octree/jit/numpy/MC cell+global/adjoint/beam-τ) | 43 tests, ~2 s |
-| T1 | `test_matrix_equivalence.py` | deterministic variant equivalence: jit vs numpy and n_jobs bit-identical; δ-M 1/2 vs 0 bands; Ng fixed point; chain vs sc band; ground/beam/periodic structure; guards | 20 tests, ~30 s |
-| T2 | `test_matrix_crossfamily.py` | zero-noise identity: MC deterministic line integral fed the SC's own source **≡** the SC octree sweep (1.2e-12 max, δ-M 0/1/2, beam on/off, both majorant modes, jit on/off), negative control (physical κ under δ-M fails by ≥ 1e-2), **ground stage-2 identity (F13 guard)**, unigrid pinned as band (F11), positive M6 ground smoke tests for all three MC entry points | 13 tests, ~2 min |
+| T1 | `test_matrix_equivalence.py` | deterministic variant equivalence: jit vs numpy and n_jobs bit-identical; δ-M 1/2 vs 0 ranges; Ng fixed point; chain vs sc range; ground/beam/periodic structure; guards | 20 tests, ~30 s |
+| T2 | `test_matrix_crossfamily.py` | zero-noise identity: MC deterministic line integral fed the SC's own source **≡** the SC octree sweep (1.2e-12 max, δ-M 0/1/2, beam on/off, both majorant modes, jit on/off), negative control (physical κ under δ-M fails by ≥ 1e-2), **ground stage-2 identity (F13 guard)**, unigrid recorded as reference range (F11), positive M6 ground smoke tests for all three MC entry points | 13 tests, ~2 min |
 | T3 | `test_matrix_statistics.py` | statistical consistency under the noise model (§6 of the plan): A1 explicit vs λ, A1 vs SC, seed-pair pooled z, next-flight F3 noise masking, adjoint masked z, **all-sky ground MC vs SC cross-family** (section 4) | 15 tests, ~3 min |
 | T4 | `test_matrix_closure.py` | invariant 4 per family with the octree-capable closure: face powers vs `∫4πκ_a(B−J)dV`, analytic-integral identities, the ground-case closure (bottom-face power includes reflected + emitted parts), cross-family absorbed power (SC-42 vs SC-162 vs MC A1) | 21 tests, ~4 min |
 | T5 | `test_matrix_ladder.py` | refinement ladders per family, reference ranking, order fits, per-family invariant-3, MC `N^-1/2` by seed splitting | 10 tests, ~15 min |
 | M6 | `test_mc_ground.py` | the MC ground law against closed forms: vacuum emission, Beer-Lambert + albedo continuum, adjoint cones, reflected-beam populations, stage-2 vs SC, determinism pairings | 13 tests, ~25 s |
 
-## 3. Pinned bands (measured regression thresholds)
+## 3. Recorded reference ranges (measured thresholds)
 
-Everything below is *measured*, not assumed; a regression outside a band
-fails the gate with the band name in the message.
+Everything below is *measured*, not assumed; a drift outside a reference range
+fails the acceptance check with the range name in the message.
 
 **Deterministic iteration / equivalence (T1).** δ-M 1/2 vs δ-M 0 converged-field
 gap ≤ 1.5e-2 (J) / 6e-2 (I) on u24³ (measured 8.4e-3 / 4.1e-2 and 8.5e-3 /
@@ -67,14 +67,14 @@ and n_jobs: bit-identical.
 source); vs the solver's own `I`: ≤ 5e-9 at tol 1e-8. With ground: same
 identity to 1e-6 (measured 8.6e-10; F13 guard). Negative control feeding
 physical κ_e under δ-M: dev 9.5e-2 (M1) / 5.8e-2 (M2). Unigrid: march vs
-chain 0.93 (I) pinned as a band — F11, not a bug.
+chain 0.93 (I) recorded as a reference range — F11, not a bug.
 
 **Statistics (T3).** Pooled per-cell z of two independent A1 runs:
 rms ∈ [0.65, 1.05] (measured 0.83–0.86 — batch σ is mildly conservative),
 |mean z| ≤ 0.10, |z| > 3 ≈ 0. All-sky ground seed pair (120k histories ×
 2 seeds, merged ground/beam tallies): rms z 0.635, tail3 0, so the merged
 tally σ is valid; seed-split aggregate power noise 1.8× the per-cell σ
-quadrature (band [0.5, 3]). Adjoint masked z vs SC columns: rms ∈
+quadrature (range [0.5, 3]). Adjoint masked z vs SC columns: rms ∈
 [0.60, 1.40] (measured 0.97) with the F3 noise mask; unmasked the z blows
 to ~1e25 on τ ≈ 0 rays — the mask is part of the estimator contract.
 
@@ -99,7 +99,7 @@ midpoint-cell-center volume rule is not the limiter.
 ~2.5 J in per-cell absolute terms in optically thick cells); REF vs u96:
 0.046 rms / 0.22 max — F11's plateau, not grid coarseness. Octree τ-ladder
 errors ~2e-2/8e-3/6e-3 (τ4/2/1) with fitted slope 0.6 in `tau_max`;
-`J_max`/`mean_J` pinned as floor bands (they saturate, F10). Unigrid Cauchy
+`J_max`/`mean_J` recorded as floor ranges (they saturate, F10). Unigrid Cauchy
 pairs 2.8e-2 → 1.4e-2 → 6.7e-3, fitted slope 1.03 — internally textbook
 first order. MC power seed-split error ∝ `N^-0.49`.
 
@@ -116,9 +116,9 @@ first order. MC power seed-split error ∝ `N^-0.49`.
 * **F5**: common random numbers couple populations — CRN off for
   inhomogeneous fields.
 * **F6**: Ng acceleration is *not* a speed win on this cloud (iteration
-  counts pinned, "no pathological slowdown" asserted).
+  counts recorded, "no pathological slowdown" asserted).
 * **F7**: octree closure residual = face-extrapolation error; `h0`, not
-  `depth`, sets closure accuracy (see T4 bands).
+  `depth`, sets closure accuracy (see T4 ranges).
 * **F9**: batch σ is honest *per cell* (A2 masked rms z ≈ 1.06 at 100
   flights) but the **aggregate** per-cell σ quadrature underestimates
   whole-domain error 2–3× (track correlation). Aggregate statements use
@@ -129,7 +129,7 @@ first order. MC power seed-split error ∝ `N^-0.49`.
 * **F11**: unigrid `chain`/`sc` carry an **h-independent** grazing-ordinate
   transport error (~12 % rms vs analytic `exp(-tau)` in the pure-absorber
   limit; octree/march exact to 1e-15). The unigrid family plateaus ~4 %
-  rms J from the octree reference at every resolution. Pinned as a finding
+  rms J from the octree reference at every resolution. Recorded as a finding
   (solver unchanged); invariant 3 is asserted **per family**.
 * **F12** (fixed 2026-11-16): the MC segment marcher filled face-crossing
   times into `np.empty`, leaving `da == 0` entries (beam `dy = 0` exactly,
@@ -154,7 +154,7 @@ first order. MC power seed-split error ∝ `N^-0.49`.
   angle-limited, not noise-limited** (adjoint vs SC columns: coherent 6–15 %
   deviations, masked rms z up to 30). It contributes to the −2.15 % T3 §4
   power offset. Refining the direction grid (T5 study) drives the two
-  conventions together; on 42 ordinates every beam per-ordinate band must
+  conventions together; on 42 ordinates every beam per-ordinate range must
   carry this caveat.
 
 ## 5. Report artifacts

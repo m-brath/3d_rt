@@ -206,7 +206,7 @@ for ax, d, tag in ((axes[1], d_down, f"downward ord d={d_down}"),
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
 fig.suptitle("MC phase M2: stage-2 radiance on the octree gaussian cloud "
-             "(bands = 2 sigma batch)")
+             "(ranges = 2 sigma batch)")
 fig.tight_layout()
 fig.savefig("plot/mc_forward_cloud.png", dpi=150)
 print("  -> plot/mc_forward_cloud.png")

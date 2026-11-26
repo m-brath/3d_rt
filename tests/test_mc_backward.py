@@ -11,9 +11,9 @@ MC — radiance at a detector from walks launched backwards from it.
      combined 2 sigma + an 8% angular/quadrature allowance (42-ordinate
      quadrature vs angle-exact MC)
   3. beam coupling: adjoint score carries the continuous-HG first-scatter
-     term; agreement vs SC-with-beam within the same band
+     term; agreement vs SC-with-beam within the same range
   4. all-sky node-direction mode (cone = 0, the default) vs SC I columns:
-     every upward ordinate inside 2 sigma + 8% rms-sky band, and the
+     every upward ordinate inside 2 sigma + 8% rms-sky range, and the
      hemispheric upward-flux closure agrees within 3%; the full-cap mode
      (cone_scale = 1) is a full-sphere aperture whose near-horizon caps
      cross the horizon and mix in downward radiance (documented)

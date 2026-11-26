@@ -21,11 +21,11 @@ The **negative control** (finding F2) feeds the *physical* ``kappa_e`` to a
 δ-M run and requires the identity to *fail* by a large margin, proving that
 the test can fail.
 
-On the **unigrid** the identity is necessarily a band, not an equality: the
+On the **unigrid** the identity is necessarily a reference range, not an equality: the
 chain sweeps integrate centre-to-centre through the lattice stencil, the SC
 sweeps interpolate a four-point bilinear stencil, and the MC march is a DDA
 segment integral -- three different discretizations of the same RTE.  The
-measured spread is pinned two-sided so a change of the stage-2 march geometry
+measured spread has recorded two-sided bounds so a change of the stage-2 march geometry
 is visible instead of hiding under a one-sided "< 1" bound.
 """
 
@@ -48,7 +48,7 @@ from rt3d.short_characteristics import sweep_all_sc
 from rt3d.transport import boundary_conditions, sweep_all, sweep_all_octree_exact
 
 # solver convergence for the identity runs: the stage-2 march uses the
-# solver's *returned* source, so the residual shows up as a (pinned) gap
+# solver's *returned* source, so the residual shows up as a (recorded) gap
 # against the solver's own I, while the same-source comparison stays exact
 SOLVE_TOL = 1e-8
 
@@ -164,7 +164,7 @@ def test_deterministic_estimator_ignores_sampling_controls(oct2):
 
 
 # =============================================================================
-# unigrid: a pinned band, not an identity
+# unigrid: a recorded reference range, not an identity
 # =============================================================================
 
 def test_unigrid_deterministic_band():
@@ -173,9 +173,9 @@ def test_unigrid_deterministic_band():
 
     Same converged ``S`` fed to (a) the chain sweep, (b) the SC sweep, (c) the
     MC DDA line integral.  Measured deviations of (c) from (a) 0.929 and from
-    (b) 0.904 -- the same order as the chain-vs-SC field spread pinned in T1,
+    (b) 0.904 -- the same order as the chain-vs-SC field spread recorded in T1,
     so this is a discretization property of the unigrid, not a stage-2 error.
-    The two-sided bands make a change of the march geometry visible.
+    The two-sided ranges make a change of the march geometry visible.
     """
     u24 = cloud_unigrid(24)
     bc = boundary_conditions(top_I=1.0, bottom_I=0.5)
@@ -201,7 +201,7 @@ def test_unigrid_deterministic_band():
 # =============================================================================
 # M6 (plan section 7): the flat Lambertian ground is supported by every MC
 # entry point -- the old "raises NotImplementedError" guard is replaced by a
-# positive smoke test (the physics itself is pinned analytically in
+# positive smoke test (the physics itself is fixed analytically in
 # tests/test_mc_ground.py; here only the plumbing across the octree path).
 # =============================================================================
 

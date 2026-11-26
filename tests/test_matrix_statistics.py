@@ -5,7 +5,7 @@ T3 of the solver-matrix plan (plan/solver-test-matrix-plan.md section 3):
 model of section 6.
 
 Unlike the existing ``test_mc_*.py`` files (which validate MC *accuracy*
-against 1D references and against SC with 2-sigma bands), here the
+against 1D references and against SC with 2-sigma ranges), here the
 **statistics themselves** are under test:
 
 * **Finding F3** — the batch standard error of a sparse-collision tally is
@@ -21,7 +21,7 @@ against 1D references and against SC with 2-sigma bands), here the
   independent-sample mean: one history contributes to many cells, so the
   naive ``std/sqrt(n)`` underestimates the standard error of the mean by a
   factor ~2.2 (measured over independent seed pairs).  Mean-z assertions are
-  therefore pinned bands, not 3-sigma-of-the-mean tests.  Also measured
+  therefore recorded reference ranges, not 3-sigma-of-the-mean tests.  Also measured
   here: differencing two paths at the **same seed** gives rms z = 0.44
   instead of 0.85 -- the numba and NumPy streams at one seed are partly
   correlated, so path comparisons must use different seeds.
@@ -93,7 +93,7 @@ NF_SEEDS = (11, 12)
 ADJ_SEEDS = (14, 15)
 ADJ_SEEDS_COUNT = 20_000
 
-# pooled-z band for two *independent* runs of the same estimator/mode/path
+# pooled-z range for two *independent* runs of the same estimator/mode/path
 # (measured 0.83-0.86: the 100-batch sigma is ~15 % conservative)
 INDEP_RMS_BAND = (0.65, 1.05)
 INDEP_MEAN_BAND = 0.10
@@ -135,7 +135,7 @@ def _pooled_z(a, b, key="J_total", sigma_key="sigma_J_total"):
 
 
 def _assert_independent_pair(stats, label):
-    """Pooled z of two independent MC runs: rms and mean bands (F9)."""
+    """Pooled z of two independent MC runs: rms and mean ranges (F9)."""
     assert stats["n"] > 1000, f"{label}: only {stats['n']} usable points"
     assert_banded(stats["rms"], *INDEP_RMS_BAND, f"{label}: rms z")
     assert_banded(abs(stats["mean"]), 0.0, INDEP_MEAN_BAND, f"{label}: |mean z|")
@@ -204,10 +204,10 @@ def test_a1_seed_to_seed_pooled_z(oct2):
     """
     Two independent seeds of one estimator must agree within their combined
     batch statistics.  Measured rms z 0.83-0.87, i.e. the 100-batch sigma is
-    ~15 % conservative -- pinned, because a *rising* rms would mean the
+    ~15 % conservative -- recorded, because a *rising* rms would mean the
     error bars are lying.
 
-    The mean z is asserted as a band (|mean z| <= 0.10), **not** as
+    The mean z is asserted as a range (|mean z| <= 0.10), **not** as
     "within 3 standard errors of 0": the per-cell errors are spatially
     correlated (one history crosses many cells), and the measured spread of
     mean z over independent pairs is 0.023 while ``std/sqrt(n)`` says 0.010
@@ -222,7 +222,7 @@ def test_a1_majorant_cell_vs_global_mode(oct2):
     ``mode='cell'`` (per-cell majorant + null collisions) and
     ``mode='global'`` (single majorant, Woodcock tracking on one bound) are
     different samplers of the same tally; differenced at *different* seeds
-    they must land in the same pooled-z band as an independent pair
+    they must land in the same pooled-z range as an independent pair
     (measured 0.85 / 0.86).
     """
     ref = _a1(oct2, A1_MODE_SEEDS[0], mode="cell")
@@ -236,7 +236,7 @@ def test_a1_jit_path_matches_numpy_path(oct2):
     """
     The numba fast path and the NumPy reference path are two independent
     samplers (M4/M5: deliberately different streams), so parity is
-    *statistical*: pooled z in the independent-pair band, no systematic
+    *statistical*: pooled z in the independent-pair range, no systematic
     offset, and the fields equal to within the per-cell noise of the tally
     itself -- measured rms relative deviation **8.1 %**, which is what two
     independent A1 runs at 2e5 boundary histories give (their per-cell
@@ -258,7 +258,7 @@ def test_a1_same_seed_paths_are_correlated(oct2):
     numba and NumPy streams partly coincide, so their difference is *not*
     an independent pair (measured rms z = 0.44 vs 0.85 for different seeds).
 
-    Pinned so that a change which (say) decorrelates the streams, or which
+    Fixed so that a change which (say) decorrelates the streams, or which
     makes the two paths share draws exactly, fails loudly -- and so that
     nobody validates path parity with one seed and then trusts the
     sigma-normalised deviation.
@@ -444,8 +444,8 @@ def test_backward_all_sky_sigma_shrinks_like_1_over_sqrt_n(oct2):
 # =============================================================================
 # The all-sky configuration -- top inflow, 30-deg beam, absorbing/scattering
 # cloud, and a Lambertian/emissive ground (albedo 0.3, eps B_g = 1) -- was
-# MC-forbidden until phase M6.  The MC ground law itself is pinned
-# analytically in tests/test_mc_ground.py; what this section pins is the
+# MC-forbidden until phase M6.  The MC ground law itself is fixed
+# analytically in tests/test_mc_ground.py; what this section records is the
 # *cross-family* behaviour on the hard case, and the statistical honesty of
 # the merged ground/beam tallies.
 #
@@ -455,7 +455,7 @@ def test_backward_all_sky_sigma_shrinks_like_1_over_sqrt_n(oct2):
 # face crossing times and every aggregate here wobbled +-5 % run to run):
 #   pooled seed-to-seed per-cell z: mean -0.016, rms 0.635, |z|>3 0
 #       -- the merged-tally sigma is valid (mildly conservative), like the
-#       A1 band of section 1; seed-split aggregate power noise is 1.8x the
+#       A1 range of section 1; seed-split aggregate power noise is 1.8x the
 #       per-cell quadrature -- a real but modest ground-track correlation
 #       (finding F9 aggregate side, same order as the no-ground ladder);
 #   convention: MC 'J_total' includes the uncollided beam column, SC 'J'
@@ -514,7 +514,7 @@ def test_ground_merged_tallies_have_valid_sigma(ground_runs):
     before batching -- this test fails loudly if a population drops out of
     the batch statistics (the pooled z of two independent runs would then
     have rms >> 1).  Measured rms 0.64, in the same mildly-conservative
-    band as the A1 pair of section 1.
+    range as the A1 pair of section 1.
     """
     a, b = ground_runs
     stats, _ = _pooled_z(a, b)
@@ -528,9 +528,9 @@ def test_ground_crossfamily_observables(oct2, sc_ground, ground_runs):
     """
     Absorbed power and mean J of the MC all-sky solution vs the SC
     all-sky solution on the *same* oct2 leaves, conventions matched (see
-    header).  Bands pinned from measurement: MC power sits ~2 % **below**
+    header).  Reference ranges recorded from measurement: MC power sits ~2 % **below**
     SC with ~1.5 % seed uncertainty; the agreement is dominated by a
-    coherent (non-noise) offset, so the honest band is the measured one,
+    coherent (non-noise) offset, so the honest range is the measured one,
     not "they agree".
     """
     from rt3d.diagnostics import cell_volumes

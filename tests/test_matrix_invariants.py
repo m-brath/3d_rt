@@ -120,7 +120,7 @@ def test_hg_quadrature_normalization(g, n_refine):
 
     The row sums are exact by construction (dg.hg_matrix(normalize=True));
     the *moment* is a quadrature error of the discrete ordinate set and is
-    pinned to the measured values (plan section 2): the 42-ordinate grid
+    fixed to the measured values (plan section 2): the 42-ordinate grid
     lags badly at strong forward peaking (g = 0.9 -> moment 0.981), the
     162-ordinate grid recovers it (0.940).
     """
@@ -133,7 +133,7 @@ def test_hg_quadrature_normalization(g, n_refine):
     # far below the continuous g
     assert first <= 1.0 + 1e-12
     assert first >= g - 0.1
-    # pinned: measured 2026-11-16 on this solver (plan section 2, T0 pass)
+    # fixed values: measured 2026-11-16 on this solver (plan section 2, T0 pass)
     pins = {(1, 0.0): 0.0, (1, -0.3): -0.3, (1, 0.3): 0.3, (1, 0.7): 0.730,
             (1, 0.9): 0.981, (1, 0.99): 1.0,
             (2, 0.0): 0.0, (2, -0.3): -0.3, (2, 0.3): 0.3, (2, 0.7): 0.701,
